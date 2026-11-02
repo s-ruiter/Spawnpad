@@ -10,7 +10,10 @@ STEPS = ["ontvangen", "uitgepakt", "uploaden", "vm_aanmaken", "disk_importeren",
 Emit = Callable[[str, str, str, "float | None"], None]
 
 
-def run_deployment(job_id: str, client, cfg: VmConfig, image: Path, emit: Emit) -> int:
+def run_deployment(
+    job_id: str, client, cfg: VmConfig, image: Path, emit: Emit,
+    on_vmid: "Callable[[int], None] | None" = None,
+) -> int:
     node = cfg.node
     volid = f"{cfg.import_storage}:import/{image.name}"
     step = "ontvangen"
@@ -36,6 +39,8 @@ def run_deployment(job_id: str, client, cfg: VmConfig, image: Path, emit: Emit) 
             vmid = cfg.vmid
         else:
             vmid = client.next_vmid()
+        if on_vmid:
+            on_vmid(vmid)
 
         run("uploaden", "Uploaden naar Proxmox")
         last = {"p": -1.0}
@@ -51,7 +56,17 @@ def run_deployment(job_id: str, client, cfg: VmConfig, image: Path, emit: Emit) 
         done("uploaden", "Upload klaar")
 
         run("vm_aanmaken", f"VM {vmid} aanmaken")
-        upid = client.create_vm(node, vmid, cfg.name, build_vm_params(cfg, volid))
+        for attempt in range(3):
+            try:
+                upid = client.create_vm(node, vmid, cfg.name, build_vm_params(cfg, volid))
+                break
+            except ProxmoxError as e:
+                if cfg.vmid is None and attempt < 2 and "exist" in e.detail.lower():
+                    vmid = client.next_vmid()
+                    if on_vmid:
+                        on_vmid(vmid)
+                    continue
+                raise
         vm_created = True
         done("vm_aanmaken")
 

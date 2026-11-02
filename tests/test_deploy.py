@@ -18,6 +18,9 @@ class FakeClient:
         if self.fail_at == name:
             raise ProxmoxError(f"{name} kapot")
 
+    def close(self):
+        pass
+
     def vmid_free(self, vmid):
         self.calls.append("vmid_free")
         return self.free
@@ -158,3 +161,39 @@ def test_upload_progress_is_emitted(image):
     run_deployment("j1", c, cfg(), image, ev)
     progress = [p for step, st, m, p in ev.items if step == "uploaden" and p is not None]
     assert 0.5 in progress and 1.0 in progress
+
+
+def test_vmid_conflict_retries_with_next_vmid(image):
+    class C(FakeClient):
+        ids = iter([100, 101])
+        attempts = 0
+
+        def next_vmid(self):
+            return next(self.ids)
+
+        def create_vm(self, node, vmid, name, params):
+            self.attempts += 1
+            if vmid == 100:
+                raise ProxmoxError("VM 100 already exists", status=500)
+            self.created = vmid
+            return "UPID:c"
+
+    c, ev = C(), Events()
+    assert run_deployment("j1", c, cfg(), image, ev) == 101
+    assert c.created == 101 and c.attempts == 2
+
+
+def test_explicit_vmid_conflict_is_not_retried(image):
+    class C(FakeClient):
+        def create_vm(self, node, vmid, name, params):
+            raise ProxmoxError("VM 100 already exists", status=500)
+
+    c, ev = C(), Events()
+    with pytest.raises(ProxmoxError):
+        run_deployment("j1", c, cfg(vmid=100), image, ev)
+
+
+def test_on_vmid_callback_reports_chosen_id(image):
+    seen = []
+    run_deployment("j1", FakeClient(), cfg(), image, Events(), on_vmid=seen.append)
+    assert seen == [105]
