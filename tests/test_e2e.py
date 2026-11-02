@@ -54,6 +54,7 @@ def _deploy(client, url, vmname="fgt-e2e"):
         "config": {
             "name": vmname, "node": "pve1", "datastore": "local-lvm", "import_storage": "local", "disk_gb": 2,
             "nics": [{"bridge": "vmbr0", "vlan": 10}, {"bridge": "vmbr1"}],
+            "extra_disks": [{"size_gb": 100}],
         },
     })
     assert r.status_code == 201, r.text
@@ -67,7 +68,7 @@ def test_full_deploy_against_fake_proxmox(client, app, fake_server):
     job = client.get(f"/api/deployments/{jid}").json()
     assert job["status"] == "done", job
     vm = fake_state["vms"][job["vmid"]]
-    assert vm["cpu"] == "host" and vm["net0"] == "virtio,bridge=vmbr0,tag=10" and vm["net1"] == "virtio,bridge=vmbr1"
+    assert vm["scsi1"] == "local-lvm:100" and vm["cpu"] == "host" and vm["net0"] == "virtio,bridge=vmbr0,tag=10" and vm["net1"] == "virtio,bridge=vmbr1"
     assert fake_state["uploads"][0]["bytes"] > 2 * 1024 * 1024
     assert "resize_disk" in fake_state["log"] and fake_state["log"][-1] == "delete_volume"
 

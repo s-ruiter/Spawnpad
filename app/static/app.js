@@ -76,7 +76,7 @@ window.addEventListener("hashchange", route);
 
 // ---- Uitrollen -----------------------------------------------------------------
 function viewDeploy() {
-  const st = { upload: null, candidate: null, servers: [], serverId: null, node: null, storages: [], importStorages: [], bridges: [], nodes: [], nics: [], uploading: false };
+  const st = { extra: [], upload: null, candidate: null, servers: [], serverId: null, node: null, storages: [], importStorages: [], bridges: [], nodes: [], nics: [], uploading: false };
   const root = h("div");
   view.append(h("h1", {}, "Uitrollen"), root);
 
@@ -98,6 +98,8 @@ function viewDeploy() {
   const nicModel = select(["virtio", "e1000", "vmxnet3"], "virtio");
   const vmidIn = h("input", { type: "number", min: 100, placeholder: "automatisch" });
   const startAfter = h("input", { type: "checkbox", id: "startAfter" });
+  const extraBox = h("div");
+  const extraHint = h("div", { class: "warn", hidden: true }, "Dit lijkt een FortiManager of FortiAnalyzer. Die heeft een tweede disk nodig voor /var (data en logs); zonder krijg je 'ERROR: /var not mounted'. Ik heb er alvast een toegevoegd.");
   const importWarn = h("div", { class: "warn", hidden: true }, "Deze node heeft geen storage met content-type 'import'. Zet dat aan bij Datacenter → Storage.");
   const submit = h("button", { class: "primary", disabled: true, onclick: doDeploy }, "Uitrollen");
 
@@ -119,6 +121,9 @@ function viewDeploy() {
         field("Naam", nameIn),
         h("div", { class: "row" }, field("CPU cores", cores), field("CPU type", cpuType), field("RAM (MB)", mem)),
         h("div", { class: "row" }, field("Datastore", dsSel), field("Disk (GB)", diskIn, "Minimaal de grootte van het image")),
+        h("label", {}, "Extra disks (lege data-disks, bijv. /var voor FortiManager)"), extraBox,
+        h("button", { class: "link", onclick: () => { st.extra.push({ size: 100, datastore: "" }); renderExtra(); } }, "+ extra disk"),
+        extraHint,
         importWarn,
         h("details", {}, h("summary", {}, "Geavanceerd"),
           h("div", { class: "row" }, field("Machine", machine), field("BIOS", bios), field("Disk-controller", scsihw)),
@@ -142,6 +147,15 @@ function viewDeploy() {
         st.nics.length > 1 ? h("button", { class: "link danger", onclick: () => { st.nics.splice(i, 1); renderNics(); refreshBtn(); } }, "✕") : null);
     }));
     refreshBtn();
+  }
+
+  function renderExtra() {
+    extraBox.replaceChildren(...st.extra.map((d, i) => {
+      const size = h("input", { type: "number", min: 1, value: d.size, oninput: () => { d.size = size.value; } });
+      const ds = select([["", "zelfde datastore als boot-disk"], ...st.storages.map((x) => x.name)], d.datastore, { onchange: () => { d.datastore = ds.value; } });
+      return h("div", { class: "nicrow" }, h("span", { class: "nlabel" }, "scsi" + (i + 1)), size, h("span", { class: "muted" }, "GB"), ds,
+        h("button", { class: "link danger", onclick: () => { st.extra.splice(i, 1); renderExtra(); } }, "✕"));
+    }));
   }
 
   function pickCandidate(name) {
@@ -172,6 +186,9 @@ function viewDeploy() {
       candWrap.hidden = body.candidates.length < 2;
       if (!nameIn.value) nameIn.value = body.candidates[0].name.replace(/\.qcow2$/i, "").replace(/[^A-Za-z0-9-]+/g, "-").toLowerCase();
       pickCandidate(body.candidates[0].name);
+      const needsDataDisk = /fmg|fortimanager|faz|fortianalyzer/i.test(file.name + " " + body.candidates[0].name);
+      extraHint.hidden = !needsDataDisk;
+      if (needsDataDisk && !st.extra.length) { st.extra.push({ size: 100, datastore: "" }); renderExtra(); }
     };
     xhr.onerror = () => { st.uploading = false; bar.hidden = true; showErr("Upload mislukt: geen verbinding met de app"); refreshBtn(); };
     const fd = new FormData(); fd.append("file", file); xhr.send(fd);
@@ -198,6 +215,7 @@ function viewDeploy() {
       dsSel.replaceChildren(...st.storages.map((x) => h("option", { value: x.name }, x.name)));
       if (lu.datastore && st.storages.some((x) => x.name === lu.datastore)) dsSel.value = lu.datastore;
       importWarn.hidden = st.importStorages.length > 0;
+      renderExtra();
       if (!st.nics.length) st.nics.push({ bridge: lu.bridge || b[0] || "", vlan: lu.vlan ?? "" });
       st.nics.forEach((n) => { if (!b.includes(n.bridge)) n.bridge = lu.bridge && b.includes(lu.bridge) ? lu.bridge : b[0] || ""; });
       renderNics();
@@ -212,6 +230,7 @@ function viewDeploy() {
       cores: Number(cores.value), memory_mb: Number(mem.value), cpu_type: cpuType.value.trim() || "host",
       bios: bios.value, machine: machine.value.trim() || "pc", scsihw: scsihw.value,
       nics: st.nics.map((n) => ({ bridge: n.bridge, vlan: n.vlan === "" || n.vlan == null ? null : Number(n.vlan), model: nicModel.value })),
+      extra_disks: st.extra.map((d) => ({ size_gb: Number(d.size), datastore: d.datastore || null })),
       start_after: startAfter.checked,
     };
     try {

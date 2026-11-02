@@ -49,6 +49,8 @@ De app draait als LXC-container op een Proxmox-host.
 - Live voortgang via server-sent events of WebSocket.
 - **Besloten door de gebruiker:** alle servers draaien Proxmox VE 9 of nieuwer en de app krijgt API-gebruikers (API-tokens). Er is dus **geen SSH** nodig: het bestand wordt via de API geüpload naar een storage met content-type `import`, waarna de VM wordt aangemaakt met de disk geïmporteerd uit dat bestand. Oudere Proxmox-versies zijn niet ondersteund. Een server waarvan geen storage `import` toestaat, krijgt een duidelijke melding op de Servers-pagina (en in de README hoe dat aan te zetten).
 
+- **Extra disks (toegevoegd na eerste gebruik, 2026-11-02):** naast de boot-disk kunnen één of meer lege data-disks worden aangemaakt (grootte in GB, optioneel andere datastore), als `scsi1`, `scsi2`, ... Reden: FortiManager en FortiAnalyzer hebben een tweede disk nodig voor `/var`; zonder die disk start de VM met "/var not mounted". De UI voegt automatisch een extra disk van 100 GB toe met een melding als de bestandsnaam op fmg/fortimanager/faz/fortianalyzer lijkt.
+
 ## Aanvullende keuzes van de ontwerper (na review, niet door de gebruiker besloten)
 
 - **VM-hardware:** standaarden geschikt voor FortiGate KVM (SeaBIOS, virtio-netwerk, virtio-scsi, seriële console), CPU-type `host`. Deze zijn per uitrol aanpasbaar in een uitklapbaar blok "Geavanceerd" (machine, BIOS, NIC-model, controller). Alleen qcow2 wordt ondersteund; andere vendors kunnen dan werken als ze dezelfde hardware accepteren.

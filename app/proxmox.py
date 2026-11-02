@@ -33,6 +33,8 @@ def build_vm_params(cfg: VmConfig, import_volid: str, tag: str | None = None) ->
     }
     if tag:
         params["tags"] = tag
+    for i, disk in enumerate(cfg.extra_disks, start=1):  # lege data-disks, bv. /var van FortiManager/FortiAnalyzer
+        params[f"scsi{i}"] = f"{disk.datastore or cfg.datastore}:{disk.size_gb}"
     for i, nic in enumerate(cfg.nics):
         value = f"{nic.model},bridge={nic.bridge}"
         if nic.vlan is not None:

@@ -7,3 +7,5 @@ data/
 .dev/
 *.egg-info/
 build/
+*.qcow2
+*.zip

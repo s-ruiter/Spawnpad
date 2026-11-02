@@ -192,3 +192,17 @@ def test_taken_vmid_is_rejected_before_job_and_keeps_upload(client, app):
     assert r.status_code == 422 and "100" in r.json()["detail"]
     assert (app.state.settings.temp_dir / "uploads" / up["upload_id"]).exists()
     assert client.get("/api/deployments").json() == []
+
+
+def test_extra_disk_must_be_positive(client, app):
+    sid, up = setup(client, app, FakeClient())
+    r = deploy(client, sid, up, extra_disks=[{"size_gb": 0}])
+    assert r.status_code == 422
+
+
+def test_extra_disks_reach_create_vm(client, app):
+    fake = FakeClient()
+    sid, up = setup(client, app, fake)
+    jid = deploy(client, sid, up, extra_disks=[{"size_gb": 100}]).json()["id"]
+    app.state.job_manager.wait(jid)
+    assert fake.created_params[0]["scsi1"] == "local-lvm:100"

@@ -167,3 +167,17 @@ def test_check_warns_when_no_storage_allows_import():
 
     res = make(h).check()
     assert res["import_storages"] == [] and "import" in res["warning"]
+
+
+def test_build_vm_params_extra_disks():
+    from app.schemas import ExtraDisk
+
+    cfg = _cfg()
+    cfg.extra_disks = [ExtraDisk(size_gb=100), ExtraDisk(size_gb=50, datastore="ssd")]
+    p = build_vm_params(cfg, "local:import/x.qcow2")
+    assert p["scsi1"] == "local-lvm:100" and p["scsi2"] == "ssd:50"
+    assert p["boot"] == "order=scsi0"
+
+
+def test_no_extra_disks_by_default():
+    assert "scsi1" not in build_vm_params(_cfg(), "local:import/x.qcow2")

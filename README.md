@@ -40,6 +40,8 @@ pct exec <CTID> -- bash -c 'cd /opt/proxlaber && runuser -u proxlaber -- git pul
 
 *Uitrollen*: sleep het bestand in het scherm, kies server en node, stel de VM in (CPU-type staat standaard op `host`) en klik *Uitrollen*. Onder *Geavanceerd* staan machine, BIOS, disk-controller, NIC-model, VMID en "VM starten na uitrollen". *Geschiedenis* toont eerdere uitrollen met logboek.
 
+**Extra disks:** FortiManager en FortiAnalyzer hebben naast de boot-disk een lege tweede disk nodig voor `/var` (data en logs). Voeg die toe onder *Extra disks*; bij bestandsnamen met fmg/faz doet het formulier dat zelf (100 GB, aan te passen). FortiGate heeft een extra disk alleen nodig voor lokale logs.
+
 Standaard-VM-hardware: SeaBIOS, virtio-scsi-single, virtio-netwerk, seriële console. De disk wordt vergroot tot de opgegeven grootte (minimaal de virtuele grootte van het image).
 
 Bij een mislukte uitrol worden de half aangemaakte VM en het geüploade import-bestand automatisch verwijderd; fout en logboek blijven bewaard. Wordt de container herstart tijdens een uitrol, dan wordt die als mislukt gemarkeerd en (voor zover mogelijk) opgeruimd.

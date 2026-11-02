@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ServerIn(BaseModel):
@@ -25,6 +25,11 @@ class NicConfig(BaseModel):
     model: str = "virtio"
 
 
+class ExtraDisk(BaseModel):
+    size_gb: int = Field(ge=1)
+    datastore: str | None = None  # leeg = zelfde datastore als de boot-disk
+
+
 class VmConfig(BaseModel):
     name: str
     node: str
@@ -39,6 +44,7 @@ class VmConfig(BaseModel):
     machine: str = "pc"
     scsihw: str = "virtio-scsi-single"
     nics: list[NicConfig]
+    extra_disks: list[ExtraDisk] = Field(default_factory=list, max_length=14)
     start_after: bool = False
 
 
