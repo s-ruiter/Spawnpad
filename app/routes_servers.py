@@ -2,6 +2,7 @@ import sqlite3
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
+from .proxmox import ProxmoxError
 from .schemas import ServerIn, ServerOut
 
 router = APIRouter(prefix="/api/servers")
@@ -66,3 +67,15 @@ def delete_server(server_id: int, request: Request) -> Response:
     conn.execute("DELETE FROM servers WHERE id=?", (server_id,))
     conn.commit()
     return Response(status_code=204)
+
+
+@router.post("/{server_id}/test")
+def test_server(server_id: int, request: Request) -> dict:
+    row = get_server(request.app.state.conn, server_id)
+    client = request.app.state.client_factory(row)
+    try:
+        return client.check()
+    except ProxmoxError as e:
+        raise HTTPException(502, e.detail)
+    finally:
+        client.close()

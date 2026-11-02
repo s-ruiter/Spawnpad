@@ -36,3 +36,32 @@ def test_delete_server(client):
     sid = client.post("/api/servers", json=SERVER).json()["id"]
     assert client.delete(f"/api/servers/{sid}").status_code == 204
     assert client.get("/api/servers").json() == []
+
+
+def _fake_factory(version):
+    import httpx
+
+    from app.proxmox import ProxmoxClient
+
+    def handler(req):
+        if req.url.path.endswith("/version"):
+            return httpx.Response(200, json={"data": {"version": version}})
+        return httpx.Response(200, json={"data": [{"storage": "local"}]})
+
+    return lambda row: ProxmoxClient(
+        row["url"], row["token_id"], row["token_secret"], transport=httpx.MockTransport(handler)
+    )
+
+
+def test_server_test_endpoint_reports_version(client, app):
+    sid = client.post("/api/servers", json=SERVER).json()["id"]
+    app.state.client_factory = _fake_factory("9.0.3")
+    r = client.post(f"/api/servers/{sid}/test")
+    assert r.status_code == 200 and r.json()["version"] == "9.0.3"
+
+
+def test_server_test_endpoint_reports_old_version_as_error(client, app):
+    sid = client.post("/api/servers", json=SERVER).json()["id"]
+    app.state.client_factory = _fake_factory("8.2.1")
+    r = client.post(f"/api/servers/{sid}/test")
+    assert r.status_code == 502 and "8.2.1" in r.json()["detail"]
