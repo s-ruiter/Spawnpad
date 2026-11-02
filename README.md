@@ -6,16 +6,25 @@ Vereist **Proxmox VE 9 of nieuwer**. De app praat uitsluitend via de Proxmox-API
 
 ## Installeren (LXC op een Proxmox-host)
 
-Kopieer dit project naar de Proxmox-host en draai als root:
+Open de shell van de Proxmox-host en draai als root:
 
 ```bash
-bash deploy/install.sh
+bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)"
 ```
 
-Optioneel aan te passen via omgevingsvariabelen: `CTID`, `HOSTNAME_CT`, `STORAGE` (standaard `local-lvm`), `TEMPLATE_STORAGE` (`local`), `BRIDGE` (`vmbr0`), `VLAN`, `DISK_GB` (16), `MEMORY` (1024).
-Het script maakt een Debian 12 container, installeert de app als systemd-service en toont daarna het adres (poort 8080).
+Het script maakt een Debian 12 container, haalt de code uit de repo (`git clone`), installeert de app als systemd-service en toont daarna het adres (poort 8080). Staat de repo op privé, geef dan inloggegevens mee in `REPO_URL` (bijvoorbeeld `REPO_URL=http://sander:TOKEN@10.10.100.3:8010/sander/ProxLaber.git`) en download het script met een token of kopieer het project naar de host en draai `bash deploy/install.sh`; dan wordt de lokale code gebruikt.
 
-De container heeft schijfruimte nodig voor tijdelijke uploads en het uitpakken van zips: reken op minstens 2× de grootte van je grootste image (`DISK_GB`).
+Optioneel aan te passen via omgevingsvariabelen: `REPO_URL`, `BRANCH` (`main`), `CTID`, `HOSTNAME_CT`, `STORAGE` (`local-lvm`), `TEMPLATE_STORAGE` (`local`), `BRIDGE` (`vmbr0`), `VLAN`, `DISK_GB` (16), `MEMORY` (1024). Bijvoorbeeld:
+
+```bash
+BRIDGE=vmbr1 VLAN=20 STORAGE=ssd bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)"
+```
+
+De container heeft schijfruimte nodig voor tijdelijke uploads en het uitpakken van zips: reken op minstens 2× de grootte van je grootste image (`DISK_GB`). Bijwerken later (de container moet bij de git-server kunnen):
+
+```bash
+pct exec <CTID> -- bash -c 'cd /opt/proxlaber && runuser -u proxlaber -- git pull -q && .venv/bin/pip install -q . && systemctl restart proxlaber'
+```
 
 ## Proxmox voorbereiden
 
