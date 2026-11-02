@@ -1,8 +1,0 @@
-pyproject.toml
-app/__init__.py
-proxlaber.egg-info/PKG-INFO
-proxlaber.egg-info/SOURCES.txt
-proxlaber.egg-info/dependency_links.txt
-proxlaber.egg-info/requires.txt
-proxlaber.egg-info/top_level.txt
-tests/test_db.py

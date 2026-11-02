@@ -1,0 +1,19 @@
+[Unit]
+Description=Proxlaber - VM-images uitrollen naar Proxmox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=proxlaber
+Group=proxlaber
+WorkingDirectory=/opt/proxlaber
+Environment=PROXLABER_DATA=/var/lib/proxlaber
+StateDirectory=proxlaber
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/opt/proxlaber/.venv/bin/uvicorn --factory app.main:create_app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

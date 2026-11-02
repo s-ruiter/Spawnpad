@@ -5,3 +5,5 @@ data/
 .superpowers/
 .pytest_cache/
 .dev/
+*.egg-info/
+build/
