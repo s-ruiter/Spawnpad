@@ -231,9 +231,135 @@ function viewDeploy() {
   }).catch((e) => showErr(e.message));
 }
 
-// ---- views for Task 8 are added below -------------------------------------------
-function viewJob() {}
-function viewHistory() {}
-function viewServers() {}
+// ---- Voortgang -------------------------------------------------------------------
+const STEPS = [
+  ["ontvangen", "Bestand ontvangen"], ["uitgepakt", "Image klaar"], ["uploaden", "Uploaden naar Proxmox"],
+  ["vm_aanmaken", "VM aanmaken"], ["disk_importeren", "Disk importeren"], ["resize", "Disk vergroten"],
+  ["netwerk_boot", "Netwerk en boot instellen"], ["klaar", "Klaar"],
+];
+const ICON = { done: "✓", running: "●", failed: "✗", pending: "○" };
+
+function viewJob(id) {
+  const stepState = {}; const stepMsg = {}; let progress = null; let speed = "";
+  const log = []; let job = null; let es = null; let stopped = false;
+  const title = h("h1", {}, "Uitrol");
+  const banner = h("div");
+  const list = h("ul", { class: "steps" });
+  const barFill = h("div"); const bar = h("div", { class: "bar", hidden: true }, barFill);
+  const logPre = h("pre", { class: "log" });
+  view.append(title, banner, h("div", { class: "card" }, list, bar),
+    h("div", { class: "card" }, h("details", {}, h("summary", {}, "Logboek"), logPre)),
+    h("a", { href: "#/uitrollen" }, "← Nieuwe uitrol"));
+
+  function apply(e) {
+    stepState[e.step] = e.state;
+    if (e.message) stepMsg[e.step] = e.message;
+    if (e.step === "uploaden" && e.progress != null) { progress = e.progress; speed = e.message; }
+    log.push(`${new Date(e.ts * 1000).toLocaleTimeString("nl-NL")}  [${e.step}] ${e.state}  ${e.message || ""}`);
+  }
+
+  function render() {
+    list.replaceChildren(...STEPS.map(([key, label]) => {
+      const state = stepState[key] || "pending";
+      const msg = key === "uploaden" && state === "running" && progress != null ? `${Math.round(progress * 100)}% · ${speed}` : stepMsg[key];
+      return h("li", { class: state }, h("span", { class: "ic" }, ICON[state]), h("span", {}, label), msg && key !== "ontvangen" ? h("span", { class: "msg" }, msg) : null);
+    }));
+    const up = stepState.uploaden === "running" && progress != null;
+    bar.hidden = !up; barFill.style.width = (progress || 0) * 100 + "%";
+    logPre.textContent = log.join("\n");
+    if (job) {
+      title.textContent = `Uitrol: ${job.vm_name}${job.server_name ? " op " + job.server_name : ""}`;
+      banner.className = job.status === "done" ? "ok" : job.status === "failed" ? "error" : "";
+      banner.textContent = job.status === "done" ? `VM ${job.vmid} is aangemaakt.` : job.status === "failed" ? `Mislukt: ${job.error || "onbekende fout"}` : "";
+    }
+  }
+
+  const seen = new Set();
+  function applyOnce(e) { if (!seen.has(e.id)) { seen.add(e.id); apply(e); } }
+
+  async function refreshJob() { job = await api("GET", `/deployments/${id}`); return job; }
+
+  function stream() {
+    if (stopped) return;
+    es = new EventSource(`/api/deployments/${id}/events`);
+    es.addEventListener("step", (m) => { applyOnce(JSON.parse(m.data)); render(); });
+    // De server sluit de stream als de uitrol klaar is; dan volgt onerror. Alleen opnieuw verbinden als de job nog loopt.
+    es.onerror = async () => {
+      es.close();
+      try { const j = await refreshJob(); j.events.forEach(applyOnce); } catch (_) { /* later opnieuw */ }
+      render();
+      if (!stopped && (!job || job.status === "running")) setTimeout(stream, 1500);
+    };
+  }
+
+  refreshJob().then((j) => {
+    j.events.forEach(applyOnce); render();
+    if (j.status === "running") stream();
+  }).catch((e) => { banner.className = "error"; banner.textContent = e.message; });
+
+  cleanup = () => { stopped = true; if (es) es.close(); };
+}
+
+// ---- Geschiedenis ----------------------------------------------------------------
+function viewHistory() {
+  const holder = h("div", { class: "card" }, "Laden…");
+  view.append(h("h1", {}, "Geschiedenis"), holder);
+  api("GET", "/deployments").then((jobs) => {
+    if (!jobs.length) { holder.replaceChildren(h("span", { class: "muted" }, "Nog geen uitrollen.")); return; }
+    holder.replaceChildren(h("table", {},
+      h("thead", {}, h("tr", {}, ["Tijd", "Naam", "Server", "VMID", "Status"].map((t) => h("th", {}, t)))),
+      h("tbody", {}, jobs.map((j) => h("tr", { class: "click", onclick: () => { location.hash = `#/job/${j.id}`; } },
+        h("td", {}, fmtTime(j.created_at)), h("td", {}, j.vm_name), h("td", {}, j.server_name || "—"), h("td", {}, j.vmid ?? "—"),
+        h("td", {}, h("span", { class: "badge " + j.status }, { done: "Klaar", failed: "Mislukt", running: "Bezig" }[j.status] || j.status)))))));
+  }).catch((e) => holder.replaceChildren(h("div", { class: "error" }, e.message)));
+}
+
+// ---- Servers ---------------------------------------------------------------------
+function viewServers() {
+  const listBox = h("div", { class: "card" }); const formBox = h("div", { class: "card" });
+  view.append(h("h1", {}, "Servers"), listBox, formBox);
+  let editing = null;
+
+  async function load() {
+    const servers = await api("GET", "/servers");
+    if (!servers.length) { listBox.replaceChildren(h("span", { class: "muted" }, "Nog geen servers. Voeg er hieronder een toe.")); return; }
+    listBox.replaceChildren(h("table", {},
+      h("thead", {}, h("tr", {}, ["Naam", "URL", "Token-ID", ""].map((t) => h("th", {}, t)))),
+      h("tbody", {}, servers.map((s) => {
+        const result = h("div", { class: "hint" });
+        return h("tr", {}, h("td", {}, s.name), h("td", {}, s.url, s.verify_tls ? null : h("span", { class: "muted" }, " (TLS niet gecontroleerd)")), h("td", {}, s.token_id),
+          h("td", { style: "text-align:right;white-space:nowrap" },
+            h("button", { class: "link", onclick: async () => {
+              result.textContent = "Testen…"; result.className = "hint";
+              try { const r = await api("POST", `/servers/${s.id}/test`); result.textContent = `Proxmox VE ${r.version}` + (r.warning ? ` — ${r.warning}` : ""); result.className = r.warning ? "warn" : "ok"; }
+              catch (e) { result.textContent = e.message; result.className = "error"; }
+            } }, "Test verbinding"), " ",
+            h("button", { class: "link", onclick: () => { editing = s; renderForm(); } }, "Bewerken"), " ",
+            h("button", { class: "link danger", onclick: async () => { if (confirm(`Server '${s.name}' verwijderen?`)) { await api("DELETE", `/servers/${s.id}`); load(); } } }, "Verwijderen"),
+            result));
+      }))));
+  }
+
+  function renderForm() {
+    const s = editing;
+    const name = h("input", { value: s ? s.name : "" });
+    const url = h("input", { value: s ? s.url : "", placeholder: "https://pve1.lan:8006" });
+    const tid = h("input", { value: s ? s.token_id : "", placeholder: "user@realm!tokenname" });
+    const sec = h("input", { type: "password", placeholder: s ? "(ongewijzigd laten = oude behouden)" : "", autocomplete: "off" });
+    const tls = h("input", { type: "checkbox", id: "skiptls" }); tls.checked = s ? !s.verify_tls : false;
+    const err = h("div", { class: "error", hidden: true });
+    formBox.replaceChildren(h("h2", {}, s ? `Bewerken: ${s.name}` : "Server toevoegen"), err,
+      h("div", { class: "row" }, field("Naam", name), field("URL", url)),
+      h("div", { class: "row" }, field("Token-ID", tid), field("Token-secret", sec)),
+      h("div", { class: "inline" }, tls, h("label", { for: "skiptls" }, "TLS-certificaat niet controleren (zelfgetekend certificaat)")),
+      h("div", { class: "actions" }, s ? h("button", { onclick: () => { editing = null; renderForm(); } }, "Annuleren") : null, " ",
+        h("button", { class: "primary", onclick: async () => {
+          const body = { name: name.value.trim(), url: url.value.trim(), token_id: tid.value.trim(), token_secret: sec.value || null, verify_tls: !tls.checked };
+          try { await api(s ? "PUT" : "POST", s ? `/servers/${s.id}` : "/servers", body); editing = null; renderForm(); load(); }
+          catch (e) { err.textContent = e.message; err.hidden = false; }
+        } }, s ? "Opslaan" : "Toevoegen")));
+  }
+  renderForm(); load().catch((e) => listBox.replaceChildren(h("div", { class: "error" }, e.message)));
+}
 
 route();
