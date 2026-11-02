@@ -25,3 +25,10 @@ def client(app):
 
     with TestClient(app) as c:
         yield c
+
+
+def make_qcow2(virtual_bytes: int = 4 * 1024**3, pad: int = 4096) -> bytes:
+    import struct
+
+    header = b"QFI\xfb" + struct.pack(">I", 3) + b"\0" * 16 + struct.pack(">Q", virtual_bytes)
+    return header + b"\0" * pad

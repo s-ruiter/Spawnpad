@@ -40,3 +40,13 @@ class VmConfig(BaseModel):
     scsihw: str = "virtio-scsi-single"
     nics: list[NicConfig]
     start_after: bool = False
+
+
+class Candidate(BaseModel):
+    name: str
+    virtual_gb: int
+
+
+class UploadInfo(BaseModel):
+    upload_id: str
+    candidates: list[Candidate]
