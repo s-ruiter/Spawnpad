@@ -19,14 +19,15 @@ def upload_dir(request: Request, upload_id: str):
 
 
 @router.post("/uploads")
-async def create_upload(file: UploadFile, request: Request) -> UploadInfo:
+def create_upload(file: UploadFile, request: Request) -> UploadInfo:  # sync: draait in de threadpool, blokkeert de event loop niet
     name = (file.filename or "").lower()
     if not name.endswith((".qcow2", ".zip")):
         raise HTTPException(422, "Alleen .qcow2 of .zip bestanden zijn toegestaan")
+    images.cleanup_old_uploads(request.app.state.settings.temp_dir)  # verlaten uploads opruimen zolang de schijf er nog is
     upload_id = uuid.uuid4().hex
     d = upload_dir(request, upload_id)
     try:
-        saved = await images.receive_upload(file, d)
+        saved = images.receive_upload(file, d)
         if name.endswith(".zip"):
             files = images.inspect_zip(saved, d)
             saved.unlink()
@@ -97,6 +98,8 @@ def create_deployment(body: DeployIn, request: Request) -> dict:
         raise HTTPException(404, str(e))
     except ValueError as e:
         raise HTTPException(422, str(e))
+    except ProxmoxError as e:
+        raise HTTPException(502, e.detail)
     return {"id": job_id}
 
 

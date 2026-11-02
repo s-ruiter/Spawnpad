@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -7,15 +8,27 @@ from .schemas import VmConfig
 
 STEPS = ["ontvangen", "uitgepakt", "uploaden", "vm_aanmaken", "disk_importeren", "resize", "netwerk_boot", "klaar"]
 
+def import_filename(job_id: str) -> str:
+    """Unieke naam op de import-storage, zodat gelijktijdige uitrollen elkaars bestand niet raken."""
+    return f"proxlaber-{job_id}.qcow2"
+
+
+def vm_tag(job_id: str) -> str:
+    return f"proxlaber-{job_id}"
+
+
 Emit = Callable[[str, str, str, "float | None"], None]
 
 
 def run_deployment(
     job_id: str, client, cfg: VmConfig, image: Path, emit: Emit,
     on_vmid: "Callable[[int], None] | None" = None,
+    cleanup_delay: float = 2.0,
 ) -> int:
     node = cfg.node
-    volid = f"{cfg.import_storage}:import/{image.name}"
+    remote_name = import_filename(job_id)
+    volid = f"{cfg.import_storage}:import/{remote_name}"
+    tag = vm_tag(job_id)
     step = "ontvangen"
     uploaded = False
     vm_created = False
@@ -39,8 +52,6 @@ def run_deployment(
             vmid = cfg.vmid
         else:
             vmid = client.next_vmid()
-        if on_vmid:
-            on_vmid(vmid)
 
         run("uploaden", "Uploaden naar Proxmox")
         last = {"p": -1.0}
@@ -51,23 +62,23 @@ def run_deployment(
                 emit("uploaden", "running", f"{bps / 1e6:.1f} MB/s", frac)
 
         uploaded = True
-        upid = client.upload_import(node, cfg.import_storage, image, image.name, on_progress)
+        upid = client.upload_import(node, cfg.import_storage, image, remote_name, on_progress)
         client.wait_task(node, upid)
         done("uploaden", "Upload klaar")
 
         run("vm_aanmaken", f"VM {vmid} aanmaken")
         for attempt in range(3):
             try:
-                upid = client.create_vm(node, vmid, cfg.name, build_vm_params(cfg, volid))
+                upid = client.create_vm(node, vmid, cfg.name, build_vm_params(cfg, volid, tag))
                 break
             except ProxmoxError as e:
                 if cfg.vmid is None and attempt < 2 and "exist" in e.detail.lower():
                     vmid = client.next_vmid()
-                    if on_vmid:
-                        on_vmid(vmid)
                     continue
                 raise
         vm_created = True
+        if on_vmid:
+            on_vmid(vmid)
         done("vm_aanmaken")
 
         run("disk_importeren", f"Disk importeren naar {cfg.datastore}")
@@ -76,7 +87,9 @@ def run_deployment(
 
         run("resize")
         if cfg.disk_gb > images.virtual_gb(image):
-            client.resize_disk(node, vmid, "scsi0", cfg.disk_gb)
+            resize_upid = client.resize_disk(node, vmid, "scsi0", cfg.disk_gb)
+            if isinstance(resize_upid, str) and resize_upid.startswith("UPID"):
+                client.wait_task(node, resize_upid)
             done("resize", f"Disk vergroot naar {cfg.disk_gb} GB")
         else:
             done("resize", "Geen vergroting nodig")
@@ -96,10 +109,13 @@ def run_deployment(
     except Exception as e:
         message = getattr(e, "detail", None) or str(e)
         if vm_created and vmid is not None:
-            try:
-                client.delete_vm(node, vmid)
-            except Exception:
-                pass
+            for attempt in range(5):  # de VM kan nog vergrendeld zijn door de lopende create/import-taak
+                try:
+                    client.delete_vm(node, vmid)
+                    break
+                except Exception:
+                    if attempt < 4:
+                        time.sleep(cleanup_delay)
         if uploaded:
             try:
                 client.delete_volume(node, cfg.import_storage, volid)

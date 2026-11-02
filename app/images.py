@@ -50,16 +50,15 @@ def inspect_zip(path: Path, dest: Path) -> list[Path]:
     return out
 
 
-async def receive_upload(upload: UploadFile, dest_dir: Path) -> Path:
+def receive_upload(upload: UploadFile, dest_dir: Path) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     target = dest_dir / (Path(upload.filename or "upload").name or "upload")
     with open(target, "wb") as fh:
-        while chunk := await upload.read(CHUNK):
-            fh.write(chunk)
+        shutil.copyfileobj(upload.file, fh, CHUNK)
     return target
 
 
-def cleanup_old_uploads(temp_dir: Path, max_age_s: float = 24 * 3600) -> None:
+def cleanup_old_uploads(temp_dir: Path, max_age_s: float = 6 * 3600) -> None:
     root = Path(temp_dir) / "uploads"
     if not root.exists():
         return

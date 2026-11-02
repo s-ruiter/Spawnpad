@@ -7,7 +7,7 @@ from typing import Callable
 
 from . import db, images
 from .config import Settings
-from .deploy import run_deployment
+from .deploy import import_filename, run_deployment, vm_tag
 from .schemas import VmConfig
 
 
@@ -33,10 +33,18 @@ class JobManager:
         if not cfg.nics:
             raise ValueError("Minimaal één netwerkinterface is nodig")
 
+        if cfg.vmid is not None:
+            client = self._get_factory()(dict(server))
+            try:
+                if not client.vmid_free(cfg.vmid):
+                    raise ValueError(f"VMID {cfg.vmid} is al in gebruik op deze server")
+            finally:
+                client.close()
+
         job_id = uuid.uuid4().hex
         conn.execute(
             "INSERT INTO jobs(id,server_id,node,vm_name,vmid,config_json,status,created_at) VALUES(?,?,?,?,?,?,?,?)",
-            (job_id, server_id, cfg.node, cfg.name, cfg.vmid,
+            (job_id, server_id, cfg.node, cfg.name, None,
              json.dumps({"config": cfg.model_dump(), "candidate": candidate, "upload_id": upload_id}),
              "running", time.time()),
         )
@@ -102,8 +110,8 @@ class JobManager:
                 meta = json.loads(row["config_json"])
                 server = conn.execute("SELECT * FROM servers WHERE id=?", (row["server_id"],)).fetchone()
                 cfg = meta["config"]
-                if row["vmid"] is not None and server is not None:
-                    self._best_effort_cleanup(dict(server), row["node"], row["vmid"], cfg["import_storage"], meta["candidate"])
+                if server is not None:
+                    self._best_effort_cleanup(dict(server), row["node"], row["vmid"], cfg["import_storage"], row["id"])
                 shutil.rmtree(self._upload_dir(meta["upload_id"]), ignore_errors=True)
                 conn.execute(
                     "UPDATE jobs SET status='failed', error=?, finished_at=? WHERE id=?",
@@ -117,20 +125,25 @@ class JobManager:
         finally:
             conn.close()
 
-    def _best_effort_cleanup(self, server: dict, node: str, vmid: int, storage: str, candidate: str) -> None:
+    def _best_effort_cleanup(self, server: dict, node: str, vmid: int | None, storage: str, job_id: str) -> None:
         try:
             client = self._get_factory()(server)
         except Exception:
             return
-        for fn in (
-            lambda: client.delete_vm(node, vmid),
-            lambda: client.delete_volume(node, storage, f"{storage}:import/{candidate}"),
-        ):
+        try:
+            # Alleen een VM verwijderen die deze job zelf heeft aangemaakt (tag), nooit alleen op vmid.
+            if vmid is not None:
+                try:
+                    if vm_tag(job_id) in client.vm_tags(node, vmid).split(";"):
+                        client.delete_vm(node, vmid)
+                except Exception:
+                    pass
             try:
-                fn()
+                client.delete_volume(node, storage, f"{storage}:import/{import_filename(job_id)}")
             except Exception:
                 pass
-        try:
-            client.close()
-        except Exception:
-            pass
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass

@@ -65,3 +65,13 @@ def test_server_test_endpoint_reports_old_version_as_error(client, app):
     app.state.client_factory = _fake_factory("8.2.1")
     r = client.post(f"/api/servers/{sid}/test")
     assert r.status_code == 502 and "8.2.1" in r.json()["detail"]
+
+
+def test_changing_url_requires_secret_again(client):
+    sid = client.post("/api/servers", json=SERVER).json()["id"]
+    upd = {k: v for k, v in SERVER.items() if k != "token_secret"}
+    upd["url"] = "https://evil.example:8006"
+    r = client.put(f"/api/servers/{sid}", json=upd)
+    assert r.status_code == 422 and "secret" in r.json()["detail"].lower()
+    upd["token_secret"] = "new-secret"
+    assert client.put(f"/api/servers/{sid}", json=upd).status_code == 200

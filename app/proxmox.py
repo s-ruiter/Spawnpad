@@ -16,7 +16,7 @@ class ProxmoxError(Exception):
         self.status = status
 
 
-def build_vm_params(cfg: VmConfig, import_volid: str) -> dict:
+def build_vm_params(cfg: VmConfig, import_volid: str, tag: str | None = None) -> dict:
     params: dict = {
         "cpu": cfg.cpu_type,
         "cores": cfg.cores,
@@ -31,6 +31,8 @@ def build_vm_params(cfg: VmConfig, import_volid: str) -> dict:
         "vga": "serial0",
         "start": 0,
     }
+    if tag:
+        params["tags"] = tag
     for i, nic in enumerate(cfg.nics):
         value = f"{nic.model},bridge={nic.bridge}"
         if nic.vlan is not None:
@@ -67,10 +69,14 @@ class ProxmoxClient:
         except httpx.HTTPError as e:
             raise ProxmoxError(f"Verbinding met Proxmox mislukt: {e}") from e
         if r.status_code >= 400:
+            # Proxmox zet de foutmelding bij 5xx vaak in de HTTP reason phrase en laat de body leeg ({"data": null})
+            parts = [r.reason_phrase]
             try:
-                detail = str(r.json().get("errors") or r.json().get("message") or r.text)
+                body = r.json()
+                parts.append(str(body.get("errors") or body.get("message") or body.get("detail") or ""))
             except ValueError:
-                detail = r.text
+                parts.append(r.text)
+            detail = " — ".join(x for x in parts if x)
             raise ProxmoxError(f"Proxmox gaf {r.status_code}: {detail}", status=r.status_code)
         return r.json().get("data")
 
@@ -149,16 +155,30 @@ class ProxmoxClient:
     def create_vm(self, node: str, vmid: int, name: str, params: dict) -> str:
         return self._req("POST", f"/nodes/{node}/qemu", data={"vmid": vmid, "name": name, **params})
 
-    def resize_disk(self, node: str, vmid: int, disk: str, size_gb: int) -> None:
-        self._req("PUT", f"/nodes/{node}/qemu/{vmid}/resize", data={"disk": disk, "size": f"{size_gb}G"})
+    def resize_disk(self, node: str, vmid: int, disk: str, size_gb: int):
+        """Geeft een UPID terug (PVE 8+ voert resize als taak uit) of None."""
+        return self._req("PUT", f"/nodes/{node}/qemu/{vmid}/resize", data={"disk": disk, "size": f"{size_gb}G"})
+
+    def vm_tags(self, node: str, vmid: int) -> str:
+        return (self._req("GET", f"/nodes/{node}/qemu/{vmid}/config") or {}).get("tags", "")
 
     def start_vm(self, node: str, vmid: int) -> str:
         return self._req("POST", f"/nodes/{node}/qemu/{vmid}/status/start")
 
     def wait_task(self, node: str, upid: str, on_tick: Callable[[], None] | None = None, timeout: float = 3600) -> None:
         deadline = time.monotonic() + timeout
+        errors = 0
         while True:
-            st = self._req("GET", f"/nodes/{node}/tasks/{upid}/status")
+            try:
+                st = self._req("GET", f"/nodes/{node}/tasks/{upid}/status")
+                errors = 0
+            except ProxmoxError as e:
+                # korte netwerkstoring of 5xx tijdens pollen: even doorproberen i.p.v. de uitrol te laten falen
+                if (e.status is None or e.status >= 500) and errors < 5:
+                    errors += 1
+                    time.sleep(self.poll_interval)
+                    continue
+                raise
             if st.get("status") == "stopped":
                 if st.get("exitstatus") != "OK":
                     raise ProxmoxError(f"Taak mislukt: {st.get('exitstatus')}")

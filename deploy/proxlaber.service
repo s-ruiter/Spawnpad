@@ -8,6 +8,7 @@ User=proxlaber
 Group=proxlaber
 WorkingDirectory=/opt/proxlaber
 Environment=PROXLABER_DATA=/var/lib/proxlaber
+Environment=TMPDIR=/var/lib/proxlaber/tmp
 StateDirectory=proxlaber
 StateDirectoryMode=0700
 UMask=0077

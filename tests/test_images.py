@@ -102,3 +102,20 @@ def test_upload_fake_qcow2_422(client):
 
 def test_upload_wrong_extension_422(client):
     assert client.post("/api/uploads", files={"file": ("a.iso", b"x")}).status_code == 422
+
+
+def test_stale_uploads_are_removed_on_new_upload(client, app):
+    old = app.state.settings.temp_dir / "uploads" / ("a" * 32)
+    old.mkdir(parents=True)
+    t = time.time() - 24 * 3600
+    os.utime(old, (t, t))
+    client.post("/api/uploads", files={"file": ("a.qcow2", make_qcow2())})
+    assert not old.exists()
+
+
+def test_upload_handler_does_not_block_event_loop():
+    import inspect
+
+    from app.routes_deploy import create_upload
+
+    assert not inspect.iscoroutinefunction(create_upload)

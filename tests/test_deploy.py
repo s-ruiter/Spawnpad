@@ -9,6 +9,11 @@ from tests.conftest import make_qcow2
 class FakeClient:
     def __init__(self, fail_at=None, free=True, fail_cleanup=False):
         self.calls = []
+        self.uploaded_names = []
+        self.created_params = []
+        self.volumes_deleted = []
+        self.resize_upid = None
+        self.vm_tag_value = "proxlaber-j9"
         self.fail_at = fail_at
         self.free = free
         self.fail_cleanup = fail_cleanup
@@ -31,12 +36,14 @@ class FakeClient:
 
     def upload_import(self, node, storage, path, filename, on_progress):
         self._do("upload_import")
+        self.uploaded_names.append(filename)
         on_progress(0.5, 1e6)
         on_progress(1.0, 1e6)
         return "UPID:up"
 
     def create_vm(self, node, vmid, name, params):
         self._do("create_vm")
+        self.created_params.append(params)
         return "UPID:create"
 
     def wait_task(self, node, upid, on_tick=None, timeout=3600):
@@ -45,6 +52,7 @@ class FakeClient:
     def resize_disk(self, node, vmid, disk, size_gb):
         self._do("resize_disk")
         self.resized = size_gb
+        return self.resize_upid
 
     def start_vm(self, node, vmid):
         self._do("start_vm")
@@ -52,11 +60,19 @@ class FakeClient:
 
     def delete_vm(self, node, vmid):
         self.calls.append("delete_vm")
+        if getattr(self, "delete_vm_failures", 0) > 0:
+            self.delete_vm_failures -= 1
+            raise ProxmoxError("VM is locked (create)")
         if self.fail_cleanup:
             raise ProxmoxError("cleanup kapot")
 
+    def vm_tags(self, node, vmid):
+        self.calls.append("vm_tags")
+        return self.vm_tag_value
+
     def delete_volume(self, node, storage, volid):
         self.calls.append("delete_volume")
+        self.volumes_deleted.append(volid)
         if self.fail_cleanup:
             raise ProxmoxError("cleanup kapot")
 
@@ -141,7 +157,7 @@ def test_failed_import_task_deletes_vm_and_volume(image):
 def test_cleanup_error_does_not_mask_original_error(image):
     c, ev = FakeClient(fail_at="resize_disk", fail_cleanup=True), Events()
     with pytest.raises(ProxmoxError, match="resize_disk kapot"):
-        run_deployment("j1", c, cfg(), image, ev)
+        run_deployment("j1", c, cfg(), image, ev, cleanup_delay=0)
 
 
 def test_no_resize_when_disk_equals_virtual_size(image):
@@ -197,3 +213,47 @@ def test_on_vmid_callback_reports_chosen_id(image):
     seen = []
     run_deployment("j1", FakeClient(), cfg(), image, Events(), on_vmid=seen.append)
     assert seen == [105]
+
+
+def test_import_file_name_is_unique_per_job(image):
+    a, b = FakeClient(), FakeClient()
+    run_deployment("jobA", a, cfg(), image, Events(), cleanup_delay=0)
+    run_deployment("jobB", b, cfg(), image, Events(), cleanup_delay=0)
+    assert a.uploaded_names == ["proxlaber-jobA.qcow2"] and b.uploaded_names == ["proxlaber-jobB.qcow2"]
+    assert a.volumes_deleted == ["local:import/proxlaber-jobA.qcow2"]
+
+
+def test_vm_is_tagged_with_job_id(image):
+    c = FakeClient()
+    run_deployment("jobA", c, cfg(), image, Events(), cleanup_delay=0)
+    assert c.created_params[0]["scsi0"].endswith("import-from=local:import/proxlaber-jobA.qcow2")
+    assert c.created_params[0]["tags"] == "proxlaber-jobA"
+
+
+def test_on_vmid_not_called_when_create_fails(image):
+    seen = []
+    c = FakeClient(fail_at="create_vm")
+    with pytest.raises(ProxmoxError):
+        run_deployment("j1", c, cfg(vmid=100), image, Events(), on_vmid=seen.append, cleanup_delay=0)
+    assert seen == []
+
+
+def test_resize_task_is_awaited_and_failure_surfaces(image):
+    class C(FakeClient):
+        def wait_task(self, node, upid, on_tick=None, timeout=3600):
+            if upid == "UPID:resize":
+                raise ProxmoxError("resize mislukt")
+
+    c, ev = C(), Events()
+    c.resize_upid = "UPID:resize"
+    with pytest.raises(ProxmoxError, match="resize mislukt"):
+        run_deployment("j1", c, cfg(), image, ev, cleanup_delay=0)
+    assert ev.states()["resize"] == "failed" and "delete_vm" in c.calls
+
+
+def test_cleanup_retries_locked_vm(image):
+    c = FakeClient(fail_at="resize_disk")
+    c.delete_vm_failures = 2
+    with pytest.raises(ProxmoxError):
+        run_deployment("j1", c, cfg(), image, Events(), cleanup_delay=0)
+    assert c.calls.count("delete_vm") == 3

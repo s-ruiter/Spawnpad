@@ -102,3 +102,43 @@ def test_http_error_has_status():
     with pytest.raises(ProxmoxError) as e:
         c._req("GET", "/version")
     assert e.value.status == 401
+
+
+def test_reason_phrase_is_part_of_error_detail():
+    def h(req):
+        return httpx.Response(500, json={"data": None}, extensions={"reason_phrase": b"VM 100 already exists"})
+
+    with pytest.raises(ProxmoxError) as e:
+        make(h)._req("POST", "/nodes/pve1/qemu")
+    assert "already exists" in e.value.detail
+
+
+def test_wait_task_retries_transient_errors():
+    calls = {"n": 0}
+
+    def h(req):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise httpx.ConnectError("blip")
+        return ok({"status": "stopped", "exitstatus": "OK"})
+
+    make(h).wait_task("pve1", "UPID:x")
+    assert calls["n"] == 3
+
+
+def test_wait_task_gives_up_after_many_errors():
+    def h(req):
+        raise httpx.ConnectError("down")
+
+    with pytest.raises(ProxmoxError):
+        make(h).wait_task("pve1", "UPID:x")
+
+
+def test_build_vm_params_includes_tag():
+    p = build_vm_params(_cfg(), "local:import/x.qcow2", tag="proxlaber-abc")
+    assert p["tags"] == "proxlaber-abc"
+
+
+def test_vm_tags_reads_config():
+    c = make(lambda req: ok({"tags": "proxlaber-abc;other"}))
+    assert c.vm_tags("pve1", 100) == "proxlaber-abc;other"

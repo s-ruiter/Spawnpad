@@ -20,7 +20,7 @@ Optioneel aan te passen via omgevingsvariabelen: `REPO_URL`, `BRANCH` (`main`), 
 BRIDGE=vmbr1 VLAN=20 STORAGE=ssd bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)"
 ```
 
-De container heeft schijfruimte nodig voor tijdelijke uploads en het uitpakken van zips: reken op minstens 2× de grootte van je grootste image (`DISK_GB`). Bijwerken later (de container moet bij de git-server kunnen):
+De container heeft schijfruimte nodig voor tijdelijke uploads en het uitpakken van zips: reken bij een zip op minstens 3× de grootte van het bestand (upload, uitpakken en kopie), bij een losse qcow2 op 2× (`DISK_GB`). Verlaten uploads worden bij de eerstvolgende upload opgeruimd (na 6 uur). Bijwerken later (de container moet bij de git-server kunnen):
 
 ```bash
 pct exec <CTID> -- bash -c 'cd /opt/proxlaber && runuser -u proxlaber -- git pull -q && .venv/bin/pip install -q . && systemctl restart proxlaber'

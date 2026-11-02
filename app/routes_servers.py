@@ -48,6 +48,9 @@ def create_server(body: ServerIn, request: Request) -> ServerOut:
 def update_server(server_id: int, body: ServerIn, request: Request) -> ServerOut:
     conn = request.app.state.conn
     old = get_server(conn, server_id)
+    new_url = body.url.rstrip("/")
+    if not body.token_secret and (new_url != old["url"] or body.token_id != old["token_id"]):
+        raise HTTPException(422, "Vul het token-secret opnieuw in als je de URL of het token-ID wijzigt")
     secret = body.token_secret or old["token_secret"]
     try:
         conn.execute(

@@ -86,7 +86,13 @@ def create_fake(fail_at: str | None = None, upload_delay: float = 0.0) -> FastAP
     @app.put("/api2/json/nodes/{node}/qemu/{vmid}/resize")
     async def resize(node: str, vmid: int, request: Request):
         state["log"].append("resize_disk")
-        return data(None)
+        return data(f"UPID:pve1:resize-{next(counter)}")  # PVE 8+ voert resize als taak uit
+
+    @app.get("/api2/json/nodes/{node}/qemu/{vmid}/config")
+    def vm_config(node: str, vmid: int):
+        if vmid not in state["vms"]:
+            raise HTTPException(500, f"Configuration file 'nodes/{node}/qemu-server/{vmid}.conf' does not exist")
+        return data({"tags": state["vms"][vmid].get("tags", "")})
 
     @app.post("/api2/json/nodes/{node}/qemu/{vmid}/status/start")
     def start(node: str, vmid: int):

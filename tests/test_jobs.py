@@ -150,3 +150,45 @@ def test_lookups(client, app):
     st = client.get(f"/api/servers/{sid}/nodes/pve1/storages").json()
     assert st["storages"][0]["name"] == "local-lvm" and st["import_storages"] == ["local"]
     assert client.get(f"/api/servers/{sid}/nodes/pve1/bridges").json() == ["vmbr0"]
+
+
+def test_vmid_not_stored_before_create(client, app):
+    sid, up = setup(client, app, FakeClient(fail_at="create_vm"))
+    jid = deploy(client, sid, up, vmid=100).json()["id"]
+    app.state.job_manager.wait(jid)
+    assert client.get(f"/api/deployments/{jid}").json()["vmid"] is None
+
+
+def _running_job(app, sid, up, vmid=120):
+    conn = app.state.conn
+    conn.execute(
+        "INSERT INTO jobs(id,server_id,node,vm_name,vmid,config_json,status,created_at) VALUES('j9',?,?,?,?,?,?,?)",
+        (sid, "pve1", "fgt", vmid,
+         json.dumps({"config": cfgbody(), "candidate": "fgt.qcow2", "upload_id": up["upload_id"]}), "running", time.time()),
+    )
+    conn.commit()
+
+
+def test_recovery_does_not_delete_foreign_vm(client, app):
+    fake = FakeClient()
+    fake.vm_tag_value = "somebody-else"
+    sid, up = setup(client, app, fake)
+    _running_job(app, sid, up)
+    app.state.job_manager.recover_on_startup()
+    assert "delete_vm" not in fake.calls
+
+
+def test_recovery_deletes_the_job_specific_volume(client, app):
+    fake = FakeClient()
+    sid, up = setup(client, app, fake)
+    _running_job(app, sid, up)
+    app.state.job_manager.recover_on_startup()
+    assert fake.volumes_deleted == ["local:import/proxlaber-j9.qcow2"]
+
+
+def test_taken_vmid_is_rejected_before_job_and_keeps_upload(client, app):
+    sid, up = setup(client, app, FakeClient(free=False))
+    r = deploy(client, sid, up, vmid=100)
+    assert r.status_code == 422 and "100" in r.json()["detail"]
+    assert (app.state.settings.temp_dir / "uploads" / up["upload_id"]).exists()
+    assert client.get("/api/deployments").json() == []
