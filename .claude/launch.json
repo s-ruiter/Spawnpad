@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {"name": "fake-proxmox", "runtimeExecutable": ".venv/bin/python", "runtimeArgs": ["scripts/fake_proxmox.py"], "port": 8006},
+    {"name": "proxlaber", "runtimeExecutable": ".venv/bin/uvicorn", "runtimeArgs": ["--factory", "app.main:create_app", "--port", "8080"], "port": 8080}
+  ]
+}

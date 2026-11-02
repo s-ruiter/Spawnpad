@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .config import Settings, get_settings
@@ -23,4 +26,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     cleanup_old_uploads(settings.temp_dir)
     app.include_router(servers_router)
     app.include_router(deploy_router)
+    app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
     return app
