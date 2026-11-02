@@ -55,9 +55,26 @@ function select(options, value, attrs) {
   return s;
 }
 
+function heading(n, text) { return h("h2", {}, h("span", { class: "num" }, n), text); }
+
 function field(label, input, hint) {
   return h("div", {}, h("label", {}, label), input, hint ? h("div", { class: "hint" }, hint) : null);
 }
+
+// lucide-iconen, 16px, lijndikte 1.5 (zie .i in style.css)
+const ICONS = {
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  "arrow-left": '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+};
+function ico(name) {
+  const s = h("span", { class: "i", "aria-hidden": "true" });
+  s.innerHTML = `<svg viewBox="0 0 24 24">${ICONS[name]}</svg>`;
+  return s;
+}
+
+function setBar(fill, fraction) { fill.style.transform = `scaleX(${Math.min(1, Math.max(0, fraction))})`; }
 
 // ---- router ------------------------------------------------------------------
 const view = document.getElementById("view");
@@ -90,7 +107,7 @@ function viewDeploy() {
   const nodeSel = h("select", { onchange: () => loadNode(nodeSel.value) });
   const serverSel = h("select", { onchange: () => loadServer(Number(serverSel.value)) });
   const candSel = h("select", { onchange: () => pickCandidate(candSel.value) });
-  const candWrap = h("div", { hidden: true }, field("Welk image uit de zip?", candSel));
+  const candWrap = h("div", { hidden: true }, field("Image in de zip", candSel));
   const nicBox = h("div");
   const machine = h("input", { value: "pc" });
   const bios = select(["seabios", "ovmf"], "seabios");
@@ -98,8 +115,8 @@ function viewDeploy() {
   const nicModel = select(["virtio", "e1000", "vmxnet3"], "virtio");
   const vmidIn = h("input", { type: "number", min: 100, placeholder: "automatisch" });
   const startAfter = h("input", { type: "checkbox", id: "startAfter" });
-  const extraBox = h("div");
-  const extraHint = h("div", { class: "warn", hidden: true }, "Dit lijkt een FortiManager of FortiAnalyzer. Die heeft een tweede disk nodig voor /var (data en logs); zonder krijg je 'ERROR: /var not mounted'. Ik heb er alvast een toegevoegd.");
+  const extraBox = h("div", { class: "tight" });
+  const extraHint = h("div", { class: "warn", hidden: true }, "Dit lijkt een FortiManager of FortiAnalyzer. Die heeft een tweede disk nodig voor /var (data en logs), anders krijg je 'ERROR: /var not mounted'. Er is alvast een disk toegevoegd.");
   const importWarn = h("div", { class: "warn", hidden: true }, "Deze node heeft geen storage met content-type 'import'. Zet dat aan bij Datacenter → Storage.");
   const submit = h("button", { class: "primary", disabled: true, onclick: doDeploy }, "Uitrollen");
 
@@ -114,23 +131,23 @@ function viewDeploy() {
 
   root.append(errBox, h("div", { class: "grid" },
     h("div", {},
-      h("div", { class: "card" }, h("h2", {}, "1 · Bestand"), dz, candWrap),
-      h("div", { class: "card" }, h("h2", {}, "2 · Proxmox server"), field("Server", serverSel), field("Node", nodeSel))),
+      h("div", { class: "card" }, heading(1, "Bestand"), dz, candWrap),
+      h("div", { class: "card" }, heading(2, "Proxmox-server"), field("Server", serverSel), field("Node", nodeSel))),
     h("div", {},
-      h("div", { class: "card" }, h("h2", {}, "3 · VM"),
+      h("div", { class: "card" }, heading(3, "VM"),
         field("Naam", nameIn),
         h("div", { class: "row" }, field("CPU cores", cores), field("CPU type", cpuType), field("RAM (MB)", mem)),
         h("div", { class: "row" }, field("Datastore", dsSel), field("Disk (GB)", diskIn, "Minimaal de grootte van het image")),
-        h("label", {}, "Extra disks (lege data-disks, bijv. /var voor FortiManager)"), extraBox,
-        h("button", { class: "link", onclick: () => { st.extra.push({ size: 100, datastore: "" }); renderExtra(); } }, "+ extra disk"),
+        h("div", {}, h("label", {}, "Extra disks"), h("div", { class: "hint", style: "margin-top: 0" }, "Lege data-disks, bijv. /var voor FortiManager")), extraBox,
+        h("button", { class: "link", onclick: () => { st.extra.push({ size: 100, datastore: "" }); renderExtra(); } }, ico("plus"), "Disk toevoegen"),
         extraHint,
         importWarn,
         h("details", {}, h("summary", {}, "Geavanceerd"),
           h("div", { class: "row" }, field("Machine", machine), field("BIOS", bios), field("Disk-controller", scsihw)),
           h("div", { class: "row" }, field("NIC-model", nicModel), field("VMID", vmidIn, "Leeg = volgende vrije")),
           h("div", { class: "inline" }, startAfter, h("label", { for: "startAfter" }, "VM starten na uitrollen")))),
-      h("div", { class: "card" }, h("h2", {}, "4 · Netwerk"), nicBox,
-        h("button", { class: "link", onclick: () => { st.nics.push({ bridge: st.bridges[0] || "", vlan: "" }); renderNics(); } }, "+ interface")),
+      h("div", { class: "card" }, heading(4, "Netwerk"), nicBox,
+        h("button", { class: "link", onclick: () => { st.nics.push({ bridge: st.bridges[0] || "", vlan: "" }); renderNics(); } }, ico("plus"), "Interface toevoegen")),
       h("div", { class: "actions" }, submit))));
 
   function showErr(msg) { errBox.textContent = msg || ""; errBox.hidden = !msg; if (msg) window.scrollTo({ top: 0, behavior: "smooth" }); }
@@ -144,7 +161,7 @@ function viewDeploy() {
       const br = select(st.bridges.length ? st.bridges : [n.bridge || ""], n.bridge, { onchange: () => { n.bridge = br.value; } });
       const vl = h("input", { class: "vlan", type: "number", min: 1, max: 4094, placeholder: "VLAN", value: n.vlan ?? "", oninput: () => { n.vlan = vl.value; } });
       return h("div", { class: "nicrow" }, h("span", { class: "nlabel" }, "net" + i), br, vl,
-        st.nics.length > 1 ? h("button", { class: "link danger", onclick: () => { st.nics.splice(i, 1); renderNics(); refreshBtn(); } }, "✕") : null);
+        st.nics.length > 1 ? h("button", { class: "icon", "aria-label": "Interface verwijderen", onclick: () => { st.nics.splice(i, 1); renderNics(); refreshBtn(); } }, ico("x")) : null);
     }));
     refreshBtn();
   }
@@ -154,7 +171,7 @@ function viewDeploy() {
       const size = h("input", { type: "number", min: 1, value: d.size, oninput: () => { d.size = size.value; } });
       const ds = select([["", "zelfde datastore als boot-disk"], ...st.storages.map((x) => x.name)], d.datastore, { onchange: () => { d.datastore = ds.value; } });
       return h("div", { class: "nicrow" }, h("span", { class: "nlabel" }, "scsi" + (i + 1)), size, h("span", { class: "muted" }, "GB"), ds,
-        h("button", { class: "link danger", onclick: () => { st.extra.splice(i, 1); renderExtra(); } }, "✕"));
+        h("button", { class: "icon", "aria-label": "Disk verwijderen", onclick: () => { st.extra.splice(i, 1); renderExtra(); } }, ico("x")));
     }));
   }
 
@@ -170,12 +187,12 @@ function viewDeploy() {
     showErr("");
     if (st.upload) api("DELETE", `/uploads/${st.upload.upload_id}`).catch(() => {});
     st.upload = null; st.candidate = null; st.uploading = true; candWrap.hidden = true;
-    dz.classList.remove("has"); bar.hidden = false; bar.firstChild.style.width = "0";
+    dz.classList.remove("has"); bar.hidden = false; setBar(bar.firstChild, 0);
     dzText.textContent = file.name; dzSub.textContent = "Uploaden…";
     refreshBtn();
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/uploads");
-    xhr.upload.onprogress = (e) => { if (e.lengthComputable) { bar.firstChild.style.width = (100 * e.loaded / e.total) + "%"; dzSub.textContent = `Uploaden… ${Math.round(100 * e.loaded / e.total)}%`; } };
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) { setBar(bar.firstChild, e.loaded / e.total); dzSub.textContent = `Uploaden… ${Math.round(100 * e.loaded / e.total)}%`; } };
     xhr.onload = () => {
       st.uploading = false; bar.hidden = true;
       let body = null; try { body = JSON.parse(xhr.responseText); } catch (_) {}
@@ -256,7 +273,11 @@ const STEPS = [
   ["vm_aanmaken", "VM aanmaken"], ["disk_importeren", "Disk importeren"], ["resize", "Disk vergroten"],
   ["netwerk_boot", "Netwerk en boot instellen"], ["klaar", "Klaar"],
 ];
-const ICON = { done: "✓", running: "●", failed: "✗", pending: "○" };
+function stateIcon(state) {
+  if (state === "done") return ico("check");
+  if (state === "failed") return ico("x");
+  return h("span", { class: "dot " + state });
+}
 
 function viewJob(id) {
   const stepState = {}; const stepMsg = {}; let progress = null; let speed = "";
@@ -268,7 +289,7 @@ function viewJob(id) {
   const logPre = h("pre", { class: "log" });
   view.append(title, banner, h("div", { class: "card" }, list, bar),
     h("div", { class: "card" }, h("details", {}, h("summary", {}, "Logboek"), logPre)),
-    h("a", { href: "#/uitrollen" }, "← Nieuwe uitrol"));
+    h("a", { href: "#/uitrollen" }, ico("arrow-left"), "Nieuwe uitrol"));
 
   function apply(e) {
     stepState[e.step] = e.state;
@@ -281,10 +302,10 @@ function viewJob(id) {
     list.replaceChildren(...STEPS.map(([key, label]) => {
       const state = stepState[key] || "pending";
       const msg = key === "uploaden" && state === "running" && progress != null ? `${Math.round(progress * 100)}% · ${speed}` : stepMsg[key];
-      return h("li", { class: state }, h("span", { class: "ic" }, ICON[state]), h("span", {}, label), msg && key !== "ontvangen" ? h("span", { class: "msg" }, msg) : null);
+      return h("li", { class: state }, h("span", { class: "ic" }, stateIcon(state)), h("span", {}, label), msg && key !== "ontvangen" ? h("span", { class: "msg" }, msg) : null);
     }));
     const up = stepState.uploaden === "running" && progress != null;
-    bar.hidden = !up; barFill.style.width = (progress || 0) * 100 + "%";
+    bar.hidden = !up; setBar(barFill, progress || 0);
     logPre.textContent = log.join("\n");
     if (job) {
       title.textContent = `Uitrol: ${job.vm_name}${job.server_name ? " op " + job.server_name : ""}`;
@@ -324,12 +345,15 @@ function viewHistory() {
   const holder = h("div", { class: "card" }, "Laden…");
   view.append(h("h1", {}, "Geschiedenis"), holder);
   api("GET", "/deployments").then((jobs) => {
-    if (!jobs.length) { holder.replaceChildren(h("span", { class: "muted" }, "Nog geen uitrollen.")); return; }
+    if (!jobs.length) { holder.replaceChildren(h("span", { class: "muted" }, "Nog geen uitrollen")); return; }
     holder.replaceChildren(h("table", {},
       h("thead", {}, h("tr", {}, ["Tijd", "Naam", "Server", "VMID", "Status"].map((t) => h("th", {}, t)))),
-      h("tbody", {}, jobs.map((j) => h("tr", { class: "click", onclick: () => { location.hash = `#/job/${j.id}`; } },
-        h("td", {}, fmtTime(j.created_at)), h("td", {}, j.vm_name), h("td", {}, j.server_name || "—"), h("td", {}, j.vmid ?? "—"),
-        h("td", {}, h("span", { class: "badge " + j.status }, { done: "Klaar", failed: "Mislukt", running: "Bezig" }[j.status] || j.status)))))));
+      h("tbody", {}, jobs.map((j) => {
+        const open = () => { location.hash = `#/job/${j.id}`; };
+        return h("tr", { class: "click", tabindex: 0, onclick: open, onkeydown: (e) => { if (e.key === "Enter") open(); } },
+          h("td", { class: "mono" }, fmtTime(j.created_at)), h("td", { class: "mono" }, j.vm_name), h("td", {}, j.server_name || "—"), h("td", { class: "mono" }, j.vmid ?? "—"),
+          h("td", {}, h("span", { class: "status" }, h("span", { class: "dot " + j.status }), { done: "Klaar", failed: "Mislukt", running: "Bezig" }[j.status] || j.status)));
+      }))));
   }).catch((e) => holder.replaceChildren(h("div", { class: "error" }, e.message)));
 }
 
@@ -346,14 +370,14 @@ function viewServers() {
       h("thead", {}, h("tr", {}, ["Naam", "URL", "Token-ID", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, servers.map((s) => {
         const result = h("div", { class: "hint" });
-        return h("tr", {}, h("td", {}, s.name), h("td", {}, s.url, s.verify_tls ? null : h("span", { class: "muted" }, " (TLS niet gecontroleerd)")), h("td", {}, s.token_id),
-          h("td", { style: "text-align:right;white-space:nowrap" },
+        return h("tr", {}, h("td", {}, s.name), h("td", { class: "mono" }, s.url, s.verify_tls ? null : h("span", { class: "muted" }, " (TLS niet gecontroleerd)")), h("td", { class: "mono" }, s.token_id),
+          h("td", { class: "actions-cell" },
             h("button", { class: "link", onclick: async () => {
               result.textContent = "Testen…"; result.className = "hint";
               try { const r = await api("POST", `/servers/${s.id}/test`); result.textContent = `Proxmox VE ${r.version}` + (r.warning ? ` — ${r.warning}` : ""); result.className = r.warning ? "warn" : "ok"; }
               catch (e) { result.textContent = e.message; result.className = "error"; }
-            } }, "Test verbinding"), " ",
-            h("button", { class: "link", onclick: () => { editing = s; renderForm(); } }, "Bewerken"), " ",
+            } }, "Test verbinding"),
+            h("button", { class: "link", onclick: () => { editing = s; renderForm(); } }, "Bewerken"),
             h("button", { class: "link danger", onclick: async () => { if (confirm(`Server '${s.name}' verwijderen?`)) { await api("DELETE", `/servers/${s.id}`); load(); } } }, "Verwijderen"),
             result));
       }))));
@@ -364,14 +388,14 @@ function viewServers() {
     const name = h("input", { value: s ? s.name : "" });
     const url = h("input", { value: s ? s.url : "", placeholder: "https://pve1.lan:8006" });
     const tid = h("input", { value: s ? s.token_id : "", placeholder: "user@realm!tokenname" });
-    const sec = h("input", { type: "password", placeholder: s ? "(ongewijzigd laten = oude behouden)" : "", autocomplete: "off" });
+    const sec = h("input", { type: "password", placeholder: s ? "Leeg laten om te behouden" : "", autocomplete: "off" });
     const tls = h("input", { type: "checkbox", id: "skiptls" }); tls.checked = s ? !s.verify_tls : false;
     const err = h("div", { class: "error", hidden: true });
     formBox.replaceChildren(h("h2", {}, s ? `Bewerken: ${s.name}` : "Server toevoegen"), err,
       h("div", { class: "row" }, field("Naam", name), field("URL", url)),
       h("div", { class: "row" }, field("Token-ID", tid), field("Token-secret", sec)),
       h("div", { class: "inline" }, tls, h("label", { for: "skiptls" }, "TLS-certificaat niet controleren (zelfgetekend certificaat)")),
-      h("div", { class: "actions" }, s ? h("button", { onclick: () => { editing = null; renderForm(); } }, "Annuleren") : null, " ",
+      h("div", { class: "actions" }, s ? h("button", { onclick: () => { editing = null; renderForm(); } }, "Annuleren") : null,
         h("button", { class: "primary", onclick: async () => {
           const body = { name: name.value.trim(), url: url.value.trim(), token_id: tid.value.trim(), token_secret: sec.value || null, verify_tls: !tls.checked };
           try { await api(s ? "PUT" : "POST", s ? `/servers/${s.id}` : "/servers", body); editing = null; renderForm(); load(); }
