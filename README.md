@@ -12,13 +12,16 @@ Open de shell van de Proxmox-host en draai als root:
 bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)"
 ```
 
-Het script maakt een Debian 12 container, haalt de code uit de repo (`git clone`), installeert de app als systemd-service en toont daarna het adres (poort 8080). Staat de repo op privé, geef dan inloggegevens mee in `REPO_URL` (bijvoorbeeld `REPO_URL=http://sander:TOKEN@10.10.100.3:8010/sander/ProxLaber.git`) en download het script met een token of kopieer het project naar de host en draai `bash deploy/install.sh`; dan wordt de lokale code gebruikt.
+Het script start een **wizard** die vraagt naar container-ID, hostnaam, storage, bridge, VLAN, netwerk (DHCP of een vast IP-adres met gateway en DNS), schijfgrootte, geheugen, cores en een optioneel root-wachtwoord. Enter neemt de standaardwaarde over; invoer wordt gecontroleerd en je krijgt een samenvatting om te bevestigen. Daarna maakt het een Debian 12 container, haalt de code uit de repo (`git clone`), installeert de app als systemd-service en toont het adres (poort 8080).
 
-Optioneel aan te passen via omgevingsvariabelen: `REPO_URL`, `BRANCH` (`main`), `CTID`, `HOSTNAME_CT`, `STORAGE` (`local-lvm`), `TEMPLATE_STORAGE` (`local`), `BRIDGE` (`vmbr0`), `VLAN`, `DISK_GB` (16), `MEMORY` (1024). Bijvoorbeeld:
+Zonder vragen (bijvoorbeeld voor automatisering) gebruik je `--yes`; dan gelden omgevingsvariabelen en standaardwaarden:
 
 ```bash
-BRIDGE=vmbr1 VLAN=20 STORAGE=ssd bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)"
+CT_IP=192.168.1.50/24 CT_GATEWAY=192.168.1.1 VLAN=20 STORAGE=ssd \
+  bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)" -- --yes
 ```
+
+Beschikbare variabelen: `CTID`, `HOSTNAME_CT`, `STORAGE`, `BRIDGE`, `VLAN`, `CT_IP` (`dhcp` of `192.168.1.50/24`), `CT_GATEWAY`, `CT_DNS`, `CT_PASSWORD`, `DISK_GB`, `MEMORY`, `CORES`, `TEMPLATE_STORAGE`, `REPO_URL`, `BRANCH` (`main`). Staat de repo op privé, geef dan inloggegevens mee in `REPO_URL` (bijvoorbeeld `http://sander:TOKEN@10.10.100.3:8010/sander/ProxLaber.git`), of kopieer het project naar de host en draai `bash deploy/install.sh`; dan wordt de lokale code gebruikt.
 
 De container heeft schijfruimte nodig voor tijdelijke uploads en het uitpakken van zips: reken bij een zip op minstens 3× de grootte van het bestand (upload, uitpakken en kopie), bij een losse qcow2 op 2× (`DISK_GB`). Verlaten uploads worden bij de eerstvolgende upload opgeruimd (na 6 uur). Bijwerken later (de container moet bij de git-server kunnen):
 
