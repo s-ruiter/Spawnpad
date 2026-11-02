@@ -84,7 +84,8 @@ class ProxmoxClient:
         version = str(self._req("GET", "/version")["version"])
         if int(version.split(".")[0]) < 9:
             raise ProxmoxError(f"Proxmox VE {version} wordt niet ondersteund (minimaal 9)")
-        storages = self._req("GET", "/storage", params={"content": "import"}) or []
+        # GET /storage kent geen 'content'-filter; de storage-configs bevatten wel een content-lijst
+        storages = [s for s in (self._req("GET", "/storage") or []) if "import" in str(s.get("content", "")).split(",")]
         result: dict = {"version": version, "import_storages": [s["storage"] for s in storages]}
         if not storages:
             result["warning"] = "Geen storage met content-type import gevonden"

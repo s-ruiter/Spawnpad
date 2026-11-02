@@ -25,8 +25,15 @@ def create_fake(fail_at: str | None = None, upload_delay: float = 0.0) -> FastAP
         return data({"version": "9.0.3", "release": "9.0"})
 
     @app.get("/api2/json/storage")
-    def storage(content: str = ""):
-        return data([{"storage": "local"}] if content == "import" else [{"storage": "local"}, {"storage": "local-lvm"}])
+    def storage(request: Request):
+        # net als echte PVE: alleen 'type' is een bekende parameter
+        unknown = set(request.query_params) - {"type"}
+        if unknown:
+            raise HTTPException(400, f"Parameter verification failed. {sorted(unknown)} property is not defined in schema")
+        return data([
+            {"storage": "local", "content": "iso,vztmpl,backup,import"},
+            {"storage": "local-lvm", "content": "images,rootdir"},
+        ])
 
     @app.get("/api2/json/nodes")
     def nodes():

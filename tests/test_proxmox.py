@@ -142,3 +142,28 @@ def test_build_vm_params_includes_tag():
 def test_vm_tags_reads_config():
     c = make(lambda req: ok({"tags": "proxlaber-abc;other"}))
     assert c.vm_tags("pve1", 100) == "proxlaber-abc;other"
+
+
+def test_check_filters_import_storages_without_unsupported_query_param():
+    def h(req):
+        if req.url.path.endswith("/version"):
+            return ok({"version": "9.0.3"})
+        # echte PVE: GET /storage kent alleen 'type', geen 'content' (400 bij onbekende parameter)
+        assert "content" not in req.url.params
+        return ok([
+            {"storage": "local", "content": "iso,vztmpl,import"},
+            {"storage": "local-lvm", "content": "images,rootdir"},
+        ])
+
+    res = make(h).check()
+    assert res["import_storages"] == ["local"] and "warning" not in res
+
+
+def test_check_warns_when_no_storage_allows_import():
+    def h(req):
+        if req.url.path.endswith("/version"):
+            return ok({"version": "9.0.3"})
+        return ok([{"storage": "local", "content": "iso,vztmpl"}])
+
+    res = make(h).check()
+    assert res["import_storages"] == [] and "import" in res["warning"]
