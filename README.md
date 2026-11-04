@@ -40,6 +40,8 @@ pct exec <CTID> -- bash -c 'cd /opt/proxlaber && runuser -u proxlaber -- git pul
 
 *Uitrollen*: sleep het bestand in het scherm, kies server en node, stel de VM in (CPU-type staat standaard op `host`) en klik *Uitrollen*. Onder *Geavanceerd* staan machine, BIOS, disk-controller, NIC-model, VMID en "VM starten na uitrollen". *Geschiedenis* toont eerdere uitrollen met logboek.
 
+**Meerdere VM's tegelijk:** klik op *Nog een VM toevoegen* voor een ander bestand (bijvoorbeeld een FortiManager én FortiGates), en gebruik *Aantal* voor meerdere VM's van hetzelfde type (`fgt-1`, `fgt-2`, ...). Server en node gelden voor de hele batch. De voortgang van alle VM's staat op één pagina; een VM die mislukt hindert de andere niet. Een vast VMID kan alleen bij aantal 1. Alle VM's worden tegelijk geüpload, dus plan voldoende schijfruimte in de LXC en netwerkcapaciteit.
+
 **Extra disks:** FortiManager en FortiAnalyzer hebben naast de boot-disk een lege tweede disk nodig voor `/var` (data en logs). Voeg die toe onder *Extra disks*; bij bestandsnamen met fmg/faz doet het formulier dat zelf (100 GB, aan te passen). FortiGate heeft een extra disk alleen nodig voor lokale logs.
 
 Standaard-VM-hardware: SeaBIOS, virtio-scsi-single, virtio-netwerk, seriële console. De disk wordt vergroot tot de opgegeven grootte (minimaal de virtuele grootte van het image).

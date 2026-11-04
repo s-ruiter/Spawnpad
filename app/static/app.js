@@ -84,41 +84,123 @@ function route() {
   if (cleanup) { cleanup(); cleanup = null; }
   const hash = location.hash || "#/uitrollen";
   const [, page, arg] = hash.split("/");
-  document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === (page === "job" ? "geschiedenis" : page)));
+  document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === (page === "job" || page === "batch" ? "geschiedenis" : page)));
   view.replaceChildren();
-  const views = { uitrollen: viewDeploy, geschiedenis: viewHistory, servers: viewServers, job: viewJob };
+  const views = { uitrollen: viewDeploy, geschiedenis: viewHistory, servers: viewServers, job: viewJob, batch: viewBatch };
   (views[page] || viewDeploy)(arg);
 }
 window.addEventListener("hashchange", route);
 
 // ---- Uitrollen -----------------------------------------------------------------
+// Eén pagina met een gedeelde server/node en één blok per VM-soort (bestand + instellingen + aantal).
 function viewDeploy() {
-  const st = { extra: [], upload: null, candidate: null, servers: [], serverId: null, node: null, storages: [], importStorages: [], bridges: [], nodes: [], nics: [], uploading: false };
+  const shared = { serverId: null, node: null, storages: [], importStorages: [], bridges: [], lastUsed: {}, listeners: [] };
+  const blocks = [];
   const root = h("div");
   view.append(h("h1", {}, "Uitrollen"), root);
 
   const errBox = h("div", { class: "error", hidden: true });
-  const nameIn = h("input", { placeholder: "bijv. fgt-lab-01", oninput: refreshBtn });
+  const nodeSel = h("select", { onchange: () => loadNode(nodeSel.value) });
+  const serverSel = h("select", { onchange: () => loadServer(Number(serverSel.value)) });
+  const importWarn = h("div", { class: "warn", hidden: true }, "Deze node heeft geen storage met content-type 'import'. Zet dat aan bij Datacenter → Storage.");
+  const blocksBox = h("div");
+  const summary = h("span", { class: "muted" });
+  const submit = h("button", { class: "primary", disabled: true, onclick: doDeploy }, "Uitrollen");
+  const addBtn = h("button", { class: "link", onclick: () => addBlock() }, ico("plus"), "Nog een VM toevoegen");
+
+  root.append(errBox,
+    h("div", { class: "card" }, h("h2", {}, "Proxmox-server"), h("div", { class: "row" }, field("Server", serverSel), field("Node", nodeSel)), importWarn),
+    blocksBox, addBtn,
+    h("div", { class: "actions space" }, summary, submit));
+
+  function showErr(msg) { errBox.textContent = msg || ""; errBox.hidden = !msg; if (msg) window.scrollTo({ top: 0, behavior: "smooth" }); }
+
+  function refresh() {
+    blocks.forEach((b, i) => b.setIndex(i + 1, blocks.length > 1));
+    const ok = shared.serverId && shared.node && shared.importStorages.length && blocks.length && blocks.every((b) => b.ready());
+    submit.disabled = !ok;
+    const total = blocks.reduce((n, b) => n + b.count(), 0);
+    summary.textContent = blocks.length > 1 || total > 1 ? blocks.map((b) => `${b.label()} ×${b.count()}`).join(" · ") : "";
+    submit.textContent = total > 1 ? `${total} VM's uitrollen` : "Uitrollen";
+  }
+
+  function addBlock() {
+    const block = createVmBlock(shared, refresh, (b) => {
+      b.dispose();
+      blocks.splice(blocks.indexOf(b), 1);
+      b.el.remove();
+      refresh();
+    });
+    blocks.push(block);
+    blocksBox.append(block.el);
+    refresh();
+    return block;
+  }
+
+  async function loadServer(id) {
+    shared.serverId = id; shared.node = null;
+    nodeSel.replaceChildren(); refresh();
+    if (!id) return;
+    try {
+      const nodes = await api("GET", `/servers/${id}/nodes`);
+      shared.lastUsed = await api("GET", `/servers/${id}/last-used`);
+      nodeSel.replaceChildren(...nodes.map((n) => h("option", { value: n }, n)));
+      await loadNode(nodes[0]);
+    } catch (e) { showErr(`Kon gegevens van de server niet ophalen: ${e.message}`); }
+  }
+
+  async function loadNode(node) {
+    shared.node = node; showErr("");
+    try {
+      const [s, b] = await Promise.all([api("GET", `/servers/${shared.serverId}/nodes/${node}/storages`), api("GET", `/servers/${shared.serverId}/nodes/${node}/bridges`)]);
+      shared.storages = s.storages; shared.importStorages = s.import_storages; shared.bridges = b;
+      importWarn.hidden = shared.importStorages.length > 0;
+      blocks.forEach((blk) => blk.refreshShared());
+      refresh();
+    } catch (e) { showErr(`Kon gegevens van de node niet ophalen: ${e.message}`); }
+  }
+
+  async function doDeploy() {
+    showErr(""); submit.disabled = true;
+    try {
+      const r = await api("POST", "/batches", { server_id: shared.serverId, items: blocks.map((b) => b.toItem()) });
+      location.hash = r.jobs.length === 1 ? `#/job/${r.jobs[0].id}` : `#/batch/${r.id}`;
+    } catch (e) { showErr(e.message); refresh(); }
+  }
+
+  addBlock();
+  api("GET", "/servers").then((servers) => {
+    if (!servers.length) {
+      root.prepend(h("div", { class: "warn" }, "Er zijn nog geen Proxmox-servers. ", h("a", { href: "#/servers" }, "Voeg er eerst een toe.")));
+      return;
+    }
+    serverSel.replaceChildren(...servers.map((s) => h("option", { value: s.id }, s.name)));
+    loadServer(servers[0].id);
+  }).catch((e) => showErr(e.message));
+}
+
+// Eén VM-blok: bestand, naam, aantal, hardware, extra disks en netwerk.
+function createVmBlock(shared, onChange, onRemove) {
+  const st = { extra: [], upload: null, candidate: null, nics: [], uploading: false };
+  const nameIn = h("input", { placeholder: "bijv. fgt-lab", oninput: () => { updateHead(); updateCountHint(); onChange(); } });
+  const countIn = h("input", { type: "number", min: 1, max: 20, value: 1, oninput: () => { updateCountHint(); onChange(); } });
+  const countHint = h("div", { class: "hint" });
   const cores = h("input", { type: "number", min: 1, value: 2 });
   const cpuType = h("input", { value: "host" });
   const mem = h("input", { type: "number", min: 256, step: 256, value: 2048 });
   const diskIn = h("input", { type: "number", min: 1, value: 2 });
-  const dsSel = h("select", { onchange: refreshBtn });
-  const nodeSel = h("select", { onchange: () => loadNode(nodeSel.value) });
-  const serverSel = h("select", { onchange: () => loadServer(Number(serverSel.value)) });
+  const dsSel = h("select", { onchange: onChange });
   const candSel = h("select", { onchange: () => pickCandidate(candSel.value) });
   const candWrap = h("div", { hidden: true }, field("Image in de zip", candSel));
   const nicBox = h("div");
+  const extraBox = h("div", { class: "tight" });
   const machine = h("input", { value: "pc" });
   const bios = select(["seabios", "ovmf"], "seabios");
   const scsihw = select(["virtio-scsi-single", "virtio-scsi-pci", "lsi"], "virtio-scsi-single");
   const nicModel = select(["virtio", "e1000", "vmxnet3"], "virtio");
   const vmidIn = h("input", { type: "number", min: 100, placeholder: "automatisch" });
-  const startAfter = h("input", { type: "checkbox", id: "startAfter" });
-  const extraBox = h("div", { class: "tight" });
+  const startAfter = h("input", { type: "checkbox" });
   const extraHint = h("div", { class: "warn", hidden: true }, "Dit lijkt een FortiManager of FortiAnalyzer. Die heeft een tweede disk nodig voor /var (data en logs), anders krijg je 'ERROR: /var not mounted'. Er is alvast een disk toegevoegd.");
-  const importWarn = h("div", { class: "warn", hidden: true }, "Deze node heeft geen storage met content-type 'import'. Zet dat aan bij Datacenter → Storage.");
-  const submit = h("button", { class: "primary", disabled: true, onclick: doDeploy }, "Uitrollen");
 
   const dzText = h("div", {}, "Sleep een .qcow2 of .zip hierheen of klik om te kiezen");
   const dzSub = h("small", {}, "");
@@ -128,48 +210,54 @@ function viewDeploy() {
   ["dragover", "dragenter"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("over"); }));
   ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("over"); }));
   dz.addEventListener("drop", (e) => { if (e.dataTransfer.files[0]) sendFile(e.dataTransfer.files[0]); });
+  const errLine = h("div", { class: "error", hidden: true });
 
-  root.append(errBox, h("div", { class: "grid" },
-    h("div", {},
-      h("div", { class: "card" }, heading(1, "Bestand"), dz, candWrap),
-      h("div", { class: "card" }, heading(2, "Proxmox-server"), field("Server", serverSel), field("Node", nodeSel))),
-    h("div", {},
-      h("div", { class: "card" }, heading(3, "VM"),
-        field("Naam", nameIn),
+  const num = h("span", { class: "num" }, "VM 1");
+  const title = h("span", {});
+  const removeBtn = h("button", { class: "icon", "aria-label": "VM verwijderen", onclick: () => onRemove(api_) }, ico("x"));
+  const el = h("div", { class: "card vmcard" },
+    h("div", { class: "vm-head" }, h("h2", {}, num, title), removeBtn),
+    errLine,
+    h("div", { class: "vmgrid" },
+      h("div", {}, dz, candWrap, extraHint),
+      h("div", {},
+        h("div", { class: "row" }, field("Naam", nameIn), h("div", { class: "narrow" }, field("Aantal", countIn))),
+        countHint,
         h("div", { class: "row" }, field("CPU cores", cores), field("CPU type", cpuType), field("RAM (MB)", mem)),
         h("div", { class: "row" }, field("Datastore", dsSel), field("Disk (GB)", diskIn, "Minimaal de grootte van het image")),
-        h("div", {}, h("label", {}, "Extra disks"), h("div", { class: "hint", style: "margin-top: 0" }, "Lege data-disks, bijv. /var voor FortiManager")), extraBox,
-        h("button", { class: "link", onclick: () => { st.extra.push({ size: 100, datastore: "" }); renderExtra(); } }, ico("plus"), "Disk toevoegen"),
-        extraHint,
-        importWarn,
+        h("div", {}, h("label", {}, "Extra disks"), h("div", { class: "hint", style: "margin-top: 0" }, "Lege data-disks, bijv. /var voor FortiManager"), extraBox,
+          h("button", { class: "link", onclick: () => { st.extra.push({ size: 100, datastore: "" }); renderExtra(); } }, ico("plus"), "Disk toevoegen")),
+        h("div", {}, h("label", {}, "Netwerk"), nicBox,
+          h("button", { class: "link", onclick: () => { st.nics.push({ bridge: shared.bridges[0] || "", vlan: "" }); renderNics(); } }, ico("plus"), "Interface toevoegen")),
         h("details", {}, h("summary", {}, "Geavanceerd"),
           h("div", { class: "row" }, field("Machine", machine), field("BIOS", bios), field("Disk-controller", scsihw)),
-          h("div", { class: "row" }, field("NIC-model", nicModel), field("VMID", vmidIn, "Leeg = volgende vrije")),
-          h("div", { class: "inline" }, startAfter, h("label", { for: "startAfter" }, "VM starten na uitrollen")))),
-      h("div", { class: "card" }, heading(4, "Netwerk"), nicBox,
-        h("button", { class: "link", onclick: () => { st.nics.push({ bridge: st.bridges[0] || "", vlan: "" }); renderNics(); } }, ico("plus"), "Interface toevoegen")),
-      h("div", { class: "actions" }, submit))));
+          h("div", { class: "row" }, field("NIC-model", nicModel), field("VMID", vmidIn, "Leeg = volgende vrije; alleen bij aantal 1")),
+          h("div", { class: "inline" }, startAfter, h("label", {}, "VM starten na uitrollen"))))));
 
-  function showErr(msg) { errBox.textContent = msg || ""; errBox.hidden = !msg; if (msg) window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function updateHead() { title.textContent = nameIn.value.trim(); }
 
-  function refreshBtn() {
-    submit.disabled = !(st.upload && st.candidate && st.serverId && st.node && nameIn.value.trim() && dsSel.value && st.importStorages.length && st.nics.length && !st.uploading);
+  function count() { return Math.max(1, Math.min(20, Number(countIn.value) || 1)); }
+
+  function updateCountHint() {
+    const n = count(); const name = nameIn.value.trim() || "naam";
+    countHint.textContent = n > 1 ? `Wordt uitgerold als ${name}-1 t/m ${name}-${n}` : "";
+    vmidIn.disabled = n > 1; if (n > 1) vmidIn.value = "";
   }
 
   function renderNics() {
     nicBox.replaceChildren(...st.nics.map((n, i) => {
-      const br = select(st.bridges.length ? st.bridges : [n.bridge || ""], n.bridge, { onchange: () => { n.bridge = br.value; } });
+      const br = select(shared.bridges.length ? shared.bridges : [n.bridge || ""], n.bridge, { onchange: () => { n.bridge = br.value; } });
       const vl = h("input", { class: "vlan", type: "number", min: 1, max: 4094, placeholder: "VLAN", value: n.vlan ?? "", oninput: () => { n.vlan = vl.value; } });
       return h("div", { class: "nicrow" }, h("span", { class: "nlabel" }, "net" + i), br, vl,
-        st.nics.length > 1 ? h("button", { class: "icon", "aria-label": "Interface verwijderen", onclick: () => { st.nics.splice(i, 1); renderNics(); refreshBtn(); } }, ico("x")) : null);
+        st.nics.length > 1 ? h("button", { class: "icon", "aria-label": "Interface verwijderen", onclick: () => { st.nics.splice(i, 1); renderNics(); onChange(); } }, ico("x")) : null);
     }));
-    refreshBtn();
+    onChange();
   }
 
   function renderExtra() {
     extraBox.replaceChildren(...st.extra.map((d, i) => {
       const size = h("input", { type: "number", min: 1, value: d.size, oninput: () => { d.size = size.value; } });
-      const ds = select([["", "zelfde datastore als boot-disk"], ...st.storages.map((x) => x.name)], d.datastore, { onchange: () => { d.datastore = ds.value; } });
+      const ds = select([["", "zelfde datastore als boot-disk"], ...shared.storages.map((x) => x.name)], d.datastore, { onchange: () => { d.datastore = ds.value; } });
       return h("div", { class: "nicrow" }, h("span", { class: "nlabel" }, "scsi" + (i + 1)), size, h("span", { class: "muted" }, "GB"), ds,
         h("button", { class: "icon", "aria-label": "Disk verwijderen", onclick: () => { st.extra.splice(i, 1); renderExtra(); } }, ico("x")));
     }));
@@ -180,8 +268,10 @@ function viewDeploy() {
     const c = st.upload.candidates.find((x) => x.name === name);
     diskIn.min = c.virtual_gb;
     diskIn.value = c.virtual_gb;
-    refreshBtn();
+    onChange();
   }
+
+  function showErr(msg) { errLine.textContent = msg || ""; errLine.hidden = !msg; }
 
   function sendFile(file) {
     showErr("");
@@ -189,82 +279,63 @@ function viewDeploy() {
     st.upload = null; st.candidate = null; st.uploading = true; candWrap.hidden = true;
     dz.classList.remove("has"); bar.hidden = false; setBar(bar.firstChild, 0);
     dzText.textContent = file.name; dzSub.textContent = "Uploaden…";
-    refreshBtn();
+    onChange();
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/uploads");
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) { setBar(bar.firstChild, e.loaded / e.total); dzSub.textContent = `Uploaden… ${Math.round(100 * e.loaded / e.total)}%`; } };
     xhr.onload = () => {
       st.uploading = false; bar.hidden = true;
       let body = null; try { body = JSON.parse(xhr.responseText); } catch (_) {}
-      if (xhr.status !== 200) { dzText.textContent = "Sleep een .qcow2 of .zip hierheen of klik om te kiezen"; dzSub.textContent = ""; showErr(errText(body, xhr.status)); refreshBtn(); return; }
+      if (xhr.status !== 200) { dzText.textContent = "Sleep een .qcow2 of .zip hierheen of klik om te kiezen"; dzSub.textContent = ""; showErr(errText(body, xhr.status)); onChange(); return; }
       st.upload = body; dz.classList.add("has");
       dzSub.textContent = `${fmtBytes(file.size)} · ${body.candidates.length} image(s) gevonden`;
       candSel.replaceChildren(...body.candidates.map((c) => h("option", { value: c.name }, `${c.name} (${c.virtual_gb} GB)`)));
       candWrap.hidden = body.candidates.length < 2;
-      if (!nameIn.value) nameIn.value = body.candidates[0].name.replace(/\.qcow2$/i, "").replace(/[^A-Za-z0-9-]+/g, "-").toLowerCase();
+      if (!nameIn.value) nameIn.value = body.candidates[0].name.replace(/\.qcow2$/i, "").replace(/[^A-Za-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+      updateHead(); updateCountHint();
       pickCandidate(body.candidates[0].name);
       const needsDataDisk = /fmg|fortimanager|faz|fortianalyzer/i.test(file.name + " " + body.candidates[0].name);
       extraHint.hidden = !needsDataDisk;
       if (needsDataDisk && !st.extra.length) { st.extra.push({ size: 100, datastore: "" }); renderExtra(); }
     };
-    xhr.onerror = () => { st.uploading = false; bar.hidden = true; showErr("Upload mislukt: geen verbinding met de app"); refreshBtn(); };
+    xhr.onerror = () => { st.uploading = false; bar.hidden = true; showErr("Upload mislukt: geen verbinding met de app"); onChange(); };
     const fd = new FormData(); fd.append("file", file); xhr.send(fd);
   }
 
-  async function loadServer(id) {
-    st.serverId = id; st.node = null;
-    nodeSel.replaceChildren(); dsSel.replaceChildren(); refreshBtn();
-    if (!id) return;
-    try {
-      st.nodes = await api("GET", `/servers/${id}/nodes`);
-      st.lastUsed = await api("GET", `/servers/${id}/last-used`);
-      nodeSel.replaceChildren(...st.nodes.map((n) => h("option", { value: n }, n)));
-      await loadNode(st.nodes[0]);
-    } catch (e) { showErr(`Kon gegevens van de server niet ophalen: ${e.message}`); }
-  }
-
-  async function loadNode(node) {
-    st.node = node; showErr("");
-    try {
-      const [s, b] = await Promise.all([api("GET", `/servers/${st.serverId}/nodes/${node}/storages`), api("GET", `/servers/${st.serverId}/nodes/${node}/bridges`)]);
-      st.storages = s.storages; st.importStorages = s.import_storages; st.bridges = b;
-      const lu = st.lastUsed || {};
-      dsSel.replaceChildren(...st.storages.map((x) => h("option", { value: x.name }, x.name)));
-      if (lu.datastore && st.storages.some((x) => x.name === lu.datastore)) dsSel.value = lu.datastore;
-      importWarn.hidden = st.importStorages.length > 0;
-      renderExtra();
-      if (!st.nics.length) st.nics.push({ bridge: lu.bridge || b[0] || "", vlan: lu.vlan ?? "" });
-      st.nics.forEach((n) => { if (!b.includes(n.bridge)) n.bridge = lu.bridge && b.includes(lu.bridge) ? lu.bridge : b[0] || ""; });
-      renderNics();
-    } catch (e) { showErr(`Kon gegevens van de node niet ophalen: ${e.message}`); }
-  }
-
-  async function doDeploy() {
-    showErr(""); submit.disabled = true;
-    const config = {
-      name: nameIn.value.trim(), node: st.node, datastore: dsSel.value, import_storage: st.importStorages[0],
-      disk_gb: Number(diskIn.value), vmid: vmidIn.value ? Number(vmidIn.value) : null,
-      cores: Number(cores.value), memory_mb: Number(mem.value), cpu_type: cpuType.value.trim() || "host",
-      bios: bios.value, machine: machine.value.trim() || "pc", scsihw: scsihw.value,
-      nics: st.nics.map((n) => ({ bridge: n.bridge, vlan: n.vlan === "" || n.vlan == null ? null : Number(n.vlan), model: nicModel.value })),
-      extra_disks: st.extra.map((d) => ({ size_gb: Number(d.size), datastore: d.datastore || null })),
-      start_after: startAfter.checked,
-    };
-    try {
-      const r = await api("POST", "/deployments", { server_id: st.serverId, upload_id: st.upload.upload_id, candidate: st.candidate, config });
-      location.hash = `#/job/${r.id}`;
-    } catch (e) { showErr(e.message); refreshBtn(); }
-  }
-
-  api("GET", "/servers").then((servers) => {
-    st.servers = servers;
-    if (!servers.length) {
-      root.prepend(h("div", { class: "warn" }, "Er zijn nog geen Proxmox-servers. ", h("a", { href: "#/servers" }, "Voeg er eerst een toe.")));
-      return;
-    }
-    serverSel.replaceChildren(...servers.map((s) => h("option", { value: s.id }, s.name)));
-    loadServer(servers[0].id);
-  }).catch((e) => showErr(e.message));
+  const api_ = {
+    el,
+    count,
+    label() { return nameIn.value.trim() || "(naamloos)"; },
+    dispose() { if (st.upload) api("DELETE", `/uploads/${st.upload.upload_id}`).catch(() => {}); },
+    setIndex(n, removable) { num.textContent = "VM " + n; removeBtn.hidden = !removable; },
+    ready() { return !!(st.upload && st.candidate && nameIn.value.trim() && dsSel.value && st.nics.length && !st.uploading); },
+    refreshShared() {
+      const lu = shared.lastUsed || {};
+      const want = dsSel.value || lu.datastore;
+      dsSel.replaceChildren(...shared.storages.map((x) => h("option", { value: x.name }, x.name)));
+      if (want && shared.storages.some((x) => x.name === want)) dsSel.value = want;
+      if (!st.nics.length) st.nics.push({ bridge: lu.bridge || shared.bridges[0] || "", vlan: lu.vlan ?? "" });
+      st.nics.forEach((n) => { if (!shared.bridges.includes(n.bridge)) n.bridge = lu.bridge && shared.bridges.includes(lu.bridge) ? lu.bridge : shared.bridges[0] || ""; });
+      renderExtra(); renderNics();
+    },
+    toItem() {
+      const n = count();
+      return {
+        upload_id: st.upload.upload_id, candidate: st.candidate, count: n,
+        config: {
+          name: nameIn.value.trim(), node: shared.node, datastore: dsSel.value, import_storage: shared.importStorages[0],
+          disk_gb: Number(diskIn.value), vmid: n === 1 && vmidIn.value ? Number(vmidIn.value) : null,
+          cores: Number(cores.value), memory_mb: Number(mem.value), cpu_type: cpuType.value.trim() || "host",
+          bios: bios.value, machine: machine.value.trim() || "pc", scsihw: scsihw.value,
+          nics: st.nics.map((x) => ({ bridge: x.bridge, vlan: x.vlan === "" || x.vlan == null ? null : Number(x.vlan), model: nicModel.value })),
+          extra_disks: st.extra.map((d) => ({ size_gb: Number(d.size), datastore: d.datastore || null })),
+          start_after: startAfter.checked,
+        },
+      };
+    },
+  };
+  api_.refreshShared();
+  return api_;
 }
 
 // ---- Voortgang -------------------------------------------------------------------
@@ -338,6 +409,49 @@ function viewJob(id) {
   }).catch((e) => { banner.className = "error"; banner.textContent = e.message; });
 
   cleanup = () => { stopped = true; if (es) es.close(); };
+}
+
+// ---- Batch-voortgang ---------------------------------------------------------------
+function viewBatch(id) {
+  const title = h("h1", {}, "Uitrol");
+  const banner = h("div");
+  const list = h("div", { class: "card batch" });
+  view.append(title, banner, list, h("a", { href: "#/uitrollen" }, ico("arrow-left"), "Nieuwe uitrol"));
+  const LABEL = Object.fromEntries(STEPS);
+  let timer = null; let stopped = false;
+
+  function render(b) {
+    const n = b.jobs.length;
+    const done = b.jobs.filter((j) => j.status === "done").length;
+    const failed = b.jobs.filter((j) => j.status === "failed").length;
+    const running = n - done - failed;
+    title.textContent = `Uitrol van ${n} VM${n === 1 ? "" : "'s"}${b.server_name ? " op " + b.server_name : ""}`;
+    banner.className = running ? "" : failed ? "error" : "ok";
+    banner.textContent = running ? `${done} van ${n} klaar${failed ? `, ${failed} mislukt` : ""}` : failed ? `${failed} van ${n} mislukt, ${done} klaar` : `Alle ${n} VM's zijn aangemaakt`;
+    list.replaceChildren(...b.jobs.map((j) => {
+      const open = () => { location.hash = `#/job/${j.id}`; };
+      const up = j.state === "running" && j.step === "uploaden" && j.upload_progress != null;
+      const fill = h("div"); setBar(fill, j.upload_progress || 0);
+      const what = j.status === "failed" ? (j.error || "Mislukt") : j.status === "done" ? `Klaar${j.vmid ? " · VMID " + j.vmid : ""}` :
+        `${LABEL[j.step] || "Wachten"}${up ? ` · ${Math.round(j.upload_progress * 100)}%` : ""}`;
+      return h("div", { class: "batchrow click", tabindex: 0, onclick: open, onkeydown: (e) => { if (e.key === "Enter") open(); } },
+        h("span", { class: "ic" }, stateIcon(j.status === "running" ? "running" : j.status)),
+        h("span", { class: "mono name" }, j.vm_name),
+        h("span", { class: j.status === "failed" ? "what bad" : "what" }, what),
+        up ? h("div", { class: "bar" }, fill) : null);
+    }));
+  }
+
+  async function tick() {
+    if (stopped) return;
+    try {
+      const b = await api("GET", `/batches/${id}`);
+      render(b);
+      if (b.jobs.some((j) => j.status === "running")) timer = setTimeout(tick, 1000);
+    } catch (e) { banner.className = "error"; banner.textContent = e.message; }
+  }
+  tick();
+  cleanup = () => { stopped = true; clearTimeout(timer); };
 }
 
 // ---- Geschiedenis ----------------------------------------------------------------

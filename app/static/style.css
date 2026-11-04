@@ -38,6 +38,23 @@ h2 .num { font: 400 12px/16px var(--mono); color: var(--muted); }
 main > a { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); text-decoration: none; font-weight: 500; transition: color .15s var(--ease); }
 main > a:hover { color: var(--text); }
 
+/* meerdere VM's */
+.vm-head { display: flex; align-items: center; justify-content: space-between; }
+.vmgrid { display: grid; grid-template-columns: 1fr 1.6fr; gap: 24px; align-items: start; }
+.vmgrid > div > * + * { margin-top: 16px; }
+.vmgrid > div > .hint { margin-top: 4px; }
+@media (max-width: 800px) { .vmgrid { grid-template-columns: 1fr; } }
+.row > .narrow { flex: 0 0 96px; }
+.actions.space { justify-content: space-between; align-items: center; }
+.batchrow { display: grid; grid-template-columns: 20px minmax(120px, 220px) 1fr; align-items: center; gap: 12px; min-height: 44px; padding: 0 4px; border-bottom: 1px solid var(--line); cursor: pointer; transition: background-color .15s var(--ease); }
+.batchrow:last-child { border-bottom: 0; }
+.batchrow:hover { background: var(--hover); }
+.batchrow .ic { display: flex; align-items: center; justify-content: center; }
+.batchrow .what { color: var(--text-2); }
+.batchrow .what.bad { color: var(--bad); }
+.batchrow .bar { grid-column: 3; margin: 0 0 8px; }
+.card.batch { padding: 8px 20px; }
+
 /* iconen */
 .i { display: inline-flex; width: 16px; height: 16px; flex: none; }
 .i svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
