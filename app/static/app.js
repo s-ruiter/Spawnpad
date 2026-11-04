@@ -94,7 +94,7 @@ window.addEventListener("hashchange", route);
 // ---- Uitrollen -----------------------------------------------------------------
 // Eén pagina met een gedeelde server/node en één blok per VM-soort (bestand + instellingen + aantal).
 function viewDeploy() {
-  const shared = { serverId: null, node: null, storages: [], importStorages: [], bridges: [], lastUsed: {}, listeners: [] };
+  const shared = { serverId: null, node: null, storages: [], importStorages: [], isoStorages: [], bridges: [], lastUsed: {}, listeners: [] };
   const blocks = [];
   const root = h("div");
   view.append(h("h1", {}, "Uitrollen"), root);
@@ -153,7 +153,7 @@ function viewDeploy() {
     shared.node = node; showErr("");
     try {
       const [s, b] = await Promise.all([api("GET", `/servers/${shared.serverId}/nodes/${node}/storages`), api("GET", `/servers/${shared.serverId}/nodes/${node}/bridges`)]);
-      shared.storages = s.storages; shared.importStorages = s.import_storages; shared.bridges = b;
+      shared.storages = s.storages; shared.importStorages = s.import_storages; shared.isoStorages = s.iso_storages || []; shared.bridges = b;
       importWarn.hidden = shared.importStorages.length > 0;
       blocks.forEach((blk) => blk.refreshShared());
       refresh();
@@ -202,6 +202,37 @@ function createVmBlock(shared, onChange, onRemove) {
   const startAfter = h("input", { type: "checkbox" });
   const extraHint = h("div", { class: "warn", hidden: true }, "Dit lijkt een FortiManager of FortiAnalyzer. Die heeft een tweede disk nodig voor /var (data en logs), anders krijg je 'ERROR: /var not mounted'. Er is alvast een disk toegevoegd.");
 
+  // Day-0 configuratie (cloud-init via config-drive-ISO)
+  const d0On = h("input", { type: "checkbox", onchange: () => { d0Box.hidden = !d0On.checked; onChange(); } });
+  const prodSel = select([["fortigate", "FortiGate"], ["fortimanager", "FortiManager"], ["fortianalyzer", "FortiAnalyzer"], ["other", "Anders (alleen eigen CLI)"]], "fortigate", { onchange: () => { if (prodSel.value === "fortimanager" || prodSel.value === "fortianalyzer") netMode.value = "static"; syncD0(); } });
+  const hostIn = h("input", { value: "{name}", placeholder: "{name}" });
+  const pwIn = h("input", { type: "password", autocomplete: "new-password", placeholder: "Leeg = niet instellen" });
+  const netMode = select([["dhcp", "DHCP"], ["static", "Vast IP"]], "dhcp", { onchange: syncD0 });
+  const ifIn = h("input", { value: "port1" });
+  const ipIn = h("input", { placeholder: "10.0.0.11/24" });
+  const gwIn = h("input", { placeholder: "10.0.0.1" });
+  const dns1 = h("input", { placeholder: "DNS 1" });
+  const dns2 = h("input", { placeholder: "DNS 2 (optioneel)" });
+  const staticBox = h("div", { hidden: true }, h("div", { class: "row" }, field("IP-adres met prefix", ipIn, "Bij aantal > 1 telt het adres per VM op"), field("Gateway", gwIn)), h("div", { class: "row" }, field("DNS 1", dns1), field("DNS 2", dns2)));
+  const cliIn = h("textarea", { placeholder: "config system global\n    set timezone 26\nend", spellcheck: "false" });
+  const tokIn = h("textarea", { placeholder: "Eén FortiFlex-token per regel (één per VM)", spellcheck: "false", oninput: () => { syncD0(); } });
+  const tokHint = h("div", { class: "hint" });
+  const tokMode = select([["mime", "MIME-bericht met licentiedeel (FortiGate)"], ["cli", "Regel 'execute vm-license' onderaan de CLI"]], "mime");
+  const isoSel = h("select", { onchange: onChange });
+  const isoWarn = h("div", { class: "warn", hidden: true }, "Deze node heeft geen storage met content-type 'ISO'. Zet dat aan bij Datacenter → Storage.");
+  const previewOut = h("pre", { class: "log", hidden: true });
+  const previewErr = h("div", { class: "error", hidden: true });
+  const previewBtn = h("button", { onclick: showPreview }, "Voorbeeld bekijken");
+  const d0Box = h("div", { class: "d0", hidden: true },
+    h("div", { class: "row" }, field("Type", prodSel), field("Hostname", hostIn, "Variabelen: {name} {n} {count} {ip}"), field("Admin-wachtwoord", pwIn)),
+    h("div", { class: "row" }, field("Netwerk", netMode), field("Interface", ifIn)),
+    staticBox,
+    field("Eigen CLI (komt na de gegenereerde config)", cliIn, "Variabelen: {name} {n} {count} {ip}. Leeg laten mag."),
+    field("FortiFlex-tokens", tokIn), tokHint, field("Token meegeven als", tokMode),
+    field("Storage voor de config-drive (ISO)", isoSel), isoWarn,
+    h("div", {}, previewBtn), previewErr, previewOut);
+  const d0Details = h("details", {}, h("summary", {}, "Day-0 configuratie (cloud-init)"),
+    h("div", { class: "inline" }, d0On, h("label", {}, "Configuratie en licentie meegeven bij de eerste start")), d0Box);
   const dzText = h("div", {}, "Sleep een .qcow2 of .zip hierheen of klik om te kiezen");
   const dzSub = h("small", {}, "");
   const bar = h("div", { class: "bar", hidden: true }, h("div"));
@@ -229,10 +260,36 @@ function createVmBlock(shared, onChange, onRemove) {
           h("button", { class: "link", onclick: () => { st.extra.push({ size: 100, datastore: "" }); renderExtra(); } }, ico("plus"), "Disk toevoegen")),
         h("div", {}, h("label", {}, "Netwerk"), nicBox,
           h("button", { class: "link", onclick: () => { st.nics.push({ bridge: shared.bridges[0] || "", vlan: "" }); renderNics(); } }, ico("plus"), "Interface toevoegen")),
+        d0Details,
         h("details", {}, h("summary", {}, "Geavanceerd"),
           h("div", { class: "row" }, field("Machine", machine), field("BIOS", bios), field("Disk-controller", scsihw)),
           h("div", { class: "row" }, field("NIC-model", nicModel), field("VMID", vmidIn, "Leeg = volgende vrije; alleen bij aantal 1")),
           h("div", { class: "inline" }, startAfter, h("label", {}, "VM starten na uitrollen"))))));
+
+  function tokens() { return tokIn.value.split(/\s+/).filter(Boolean); }
+
+  function syncD0() {
+    staticBox.hidden = netMode.value !== "static";
+    const n = tokens().length;
+    tokHint.textContent = n ? `${n} token${n === 1 ? "" : "s"} voor ${count()} VM${count() === 1 ? "" : "'s"}${n !== count() ? " — dit moeten er evenveel zijn" : ""}` : "";
+    onChange();
+  }
+
+  function d0Spec() {
+    return {
+      product: prodSel.value, hostname: hostIn.value.trim() || null, admin_password: pwIn.value || null,
+      network: { mode: netMode.value, interface: ifIn.value.trim() || "port1", ip: ipIn.value.trim() || null, gateway: gwIn.value.trim() || null, dns: [dns1.value.trim(), dns2.value.trim()].filter(Boolean) },
+      custom_cli: cliIn.value, tokens: tokens(), token_mode: tokMode.value,
+    };
+  }
+
+  async function showPreview() {
+    previewErr.hidden = true; previewOut.hidden = true;
+    try {
+      const r = await api("POST", "/cloudinit/preview", { day0: d0Spec(), name: count() > 1 ? `${nameIn.value.trim() || "vm"}-1` : nameIn.value.trim() || "vm", n: 1, count: count() });
+      previewOut.textContent = r.user_data || "(leeg)"; previewOut.hidden = false;
+    } catch (e) { previewErr.textContent = e.message; previewErr.hidden = false; }
+  }
 
   function updateHead() { title.textContent = nameIn.value.trim(); }
 
@@ -242,6 +299,7 @@ function createVmBlock(shared, onChange, onRemove) {
     const n = count(); const name = nameIn.value.trim() || "naam";
     countHint.textContent = n > 1 ? `Wordt uitgerold als ${name}-1 t/m ${name}-${n}` : "";
     vmidIn.disabled = n > 1; if (n > 1) vmidIn.value = "";
+    if (typeof tokHint !== "undefined") syncD0();
   }
 
   function renderNics() {
@@ -296,6 +354,10 @@ function createVmBlock(shared, onChange, onRemove) {
       pickCandidate(body.candidates[0].name);
       const needsDataDisk = /fmg|fortimanager|faz|fortianalyzer/i.test(file.name + " " + body.candidates[0].name);
       extraHint.hidden = !needsDataDisk;
+      const fname = (file.name + " " + body.candidates[0].name).toLowerCase();
+      if (/fmg|fortimanager/.test(fname)) prodSel.value = "fortimanager"; else if (/faz|fortianalyzer/.test(fname)) prodSel.value = "fortianalyzer";
+      if (prodSel.value !== "fortigate" && netMode.value === "dhcp") netMode.value = "static";
+      syncD0();
       if (needsDataDisk && !st.extra.length) { st.extra.push({ size: 100, datastore: "" }); renderExtra(); }
     };
     xhr.onerror = () => { st.uploading = false; bar.hidden = true; showErr("Upload mislukt: geen verbinding met de app"); onChange(); };
@@ -308,7 +370,7 @@ function createVmBlock(shared, onChange, onRemove) {
     label() { return nameIn.value.trim() || "(naamloos)"; },
     dispose() { if (st.upload) api("DELETE", `/uploads/${st.upload.upload_id}`).catch(() => {}); },
     setIndex(n, removable) { num.textContent = "VM " + n; removeBtn.hidden = !removable; },
-    ready() { return !!(st.upload && st.candidate && nameIn.value.trim() && dsSel.value && st.nics.length && !st.uploading); },
+    ready() { return !!(st.upload && st.candidate && nameIn.value.trim() && dsSel.value && st.nics.length && !st.uploading && (!d0On.checked || isoSel.value)); },
     refreshShared() {
       const lu = shared.lastUsed || {};
       const want = dsSel.value || lu.datastore;
@@ -316,6 +378,8 @@ function createVmBlock(shared, onChange, onRemove) {
       if (want && shared.storages.some((x) => x.name === want)) dsSel.value = want;
       if (!st.nics.length) st.nics.push({ bridge: lu.bridge || shared.bridges[0] || "", vlan: lu.vlan ?? "" });
       st.nics.forEach((n) => { if (!shared.bridges.includes(n.bridge)) n.bridge = lu.bridge && shared.bridges.includes(lu.bridge) ? lu.bridge : shared.bridges[0] || ""; });
+      isoSel.replaceChildren(...shared.isoStorages.map((x) => h("option", { value: x }, x)));
+      isoWarn.hidden = shared.isoStorages.length > 0;
       renderExtra(); renderNics();
     },
     toItem() {
@@ -329,8 +393,9 @@ function createVmBlock(shared, onChange, onRemove) {
           bios: bios.value, machine: machine.value.trim() || "pc", scsihw: scsihw.value,
           nics: st.nics.map((x) => ({ bridge: x.bridge, vlan: x.vlan === "" || x.vlan == null ? null : Number(x.vlan), model: nicModel.value })),
           extra_disks: st.extra.map((d) => ({ size_gb: Number(d.size), datastore: d.datastore || null })),
-          start_after: startAfter.checked,
+          start_after: startAfter.checked, iso_storage: d0On.checked ? isoSel.value || null : null,
         },
+        day0: d0On.checked ? d0Spec() : null,
       };
     },
   };
