@@ -1,6 +1,6 @@
 import pytest
 
-from app.deploy import STEPS, run_deployment
+from app.deploy import STEPS, iso_filename, run_deployment
 from app.proxmox import ProxmoxError
 from app.schemas import NicConfig, VmConfig
 from tests.conftest import make_qcow2
@@ -10,6 +10,7 @@ class FakeClient:
     def __init__(self, fail_at=None, free=True, fail_cleanup=False):
         self.calls = []
         self.uploaded_names = []
+        self.iso_uploads = []  # (storage, filename, content, bytes)
         self.created_params = []
         self.volumes_deleted = []
         self.resize_upid = None
@@ -40,6 +41,14 @@ class FakeClient:
         on_progress(0.5, 1e6)
         on_progress(1.0, 1e6)
         return "UPID:up"
+
+    def iso_storages(self, node):
+        return ["local"]
+
+    def upload_file(self, node, storage, path, filename, content, on_progress):
+        self._do("upload_file")
+        self.iso_uploads.append((storage, filename, content, open(path, "rb").read()))
+        return "UPID:iso"
 
     def create_vm(self, node, vmid, name, params):
         self._do("create_vm")
@@ -305,3 +314,57 @@ def test_without_lock_there_is_no_reservation_wait(image):
     c = FakeClient()
     run_deployment("j1", c, cfg(), image, Events())
     assert c.calls.count("vmid_free") == 0
+
+
+def cfg_ci(**kw):
+    return cfg(iso_storage="local", user_data="config system global\n set hostname SECRETHOST\nend\n LICENSE-TOKEN:TOKEN12345", **kw)
+
+
+def test_cloudinit_step_is_in_steps():
+    assert STEPS.index("cloudinit") == STEPS.index("uploaden") + 1
+
+
+def test_cloudinit_iso_is_uploaded_and_attached(image):
+    c, ev = FakeClient(), Events()
+    run_deployment("j1", c, cfg_ci(), image, ev, cleanup_delay=0)
+    storage, filename, content, data = c.iso_uploads[0]
+    assert (storage, filename, content) == ("local", "proxlaber-j1.iso", "iso")
+    assert b"SECRETHOST" in data  # de user_data zit in de ISO
+    assert c.created_params[0]["ide2"] == "local:iso/proxlaber-j1.iso,media=cdrom"
+    order = [x for x in c.calls if x in ("upload_import", "upload_file", "create_vm")]
+    assert order == ["upload_import", "upload_file", "create_vm"]
+    assert ev.states()["cloudinit"] == "done"
+    assert "proxlaber-j1.iso" == iso_filename("j1")
+    assert not (image.parent / "proxlaber-j1.iso").exists()  # tijdelijke ISO is opgeruimd
+
+
+def test_no_cloudinit_means_no_iso(image):
+    c, ev = FakeClient(), Events()
+    run_deployment("j1", c, cfg(), image, ev, cleanup_delay=0)
+    assert c.iso_uploads == [] and "ide2" not in c.created_params[0]
+    assert ev.states()["cloudinit"] == "done"
+
+
+def test_failure_after_iso_upload_deletes_iso_volume(image):
+    c = FakeClient(fail_at="create_vm")
+    with pytest.raises(ProxmoxError):
+        run_deployment("j1", c, cfg_ci(), image, Events(), cleanup_delay=0)
+    assert "local:iso/proxlaber-j1.iso" in c.volumes_deleted
+    assert "local:import/proxlaber-j1.qcow2" in c.volumes_deleted
+
+
+def test_iso_upload_failure_cleans_up_both(image):
+    c = FakeClient(fail_at="upload_file")
+    with pytest.raises(ProxmoxError):
+        run_deployment("j1", c, cfg_ci(), image, Events(), cleanup_delay=0)
+    assert "local:iso/proxlaber-j1.iso" in c.volumes_deleted
+    assert not (image.parent / "proxlaber-j1.iso").exists()
+
+
+def test_secrets_never_appear_in_events(image):
+    c, ev = FakeClient(fail_at="create_vm"), Events()
+    with pytest.raises(ProxmoxError):
+        run_deployment("j1", c, cfg_ci(), image, ev, cleanup_delay=0)
+    run_deployment("j2", FakeClient(), cfg_ci(), image, ev, cleanup_delay=0)
+    text = " ".join(m for _, _, m, _ in ev.items)
+    assert "TOKEN12345" not in text and "SECRETHOST" not in text

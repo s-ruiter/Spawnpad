@@ -41,7 +41,7 @@ def create_fake(fail_at: str | None = None, upload_delay: float = 0.0) -> FastAP
 
     @app.get("/api2/json/nodes/{node}/storage")
     def node_storage(node: str, content: str = ""):
-        if content == "import":
+        if content in ("import", "iso"):
             return data([{"storage": "local"}])
         return data([{"storage": "local-lvm", "avail": 200 * 1024**3}, {"storage": "ssd", "avail": 80 * 1024**3}])
 
@@ -61,12 +61,18 @@ def create_fake(fail_at: str | None = None, upload_delay: float = 0.0) -> FastAP
     async def upload(node: str, storage: str, request: Request):
         import asyncio
 
+        import re
+
         size = 0
+        kind = None
         async for chunk in request.stream():
+            if kind is None:
+                m = re.search(rb'name="content"\r\n\r\n(\w+)', chunk)
+                kind = m.group(1).decode() if m else "?"
             size += len(chunk)
             if upload_delay:
                 await asyncio.sleep(upload_delay)
-        state["uploads"].append({"storage": storage, "bytes": size})
+        state["uploads"].append({"storage": storage, "bytes": size, "content": kind})
         state["volumes"].append(storage)
         state["log"].append("upload")
         return data(f"UPID:pve1:upload-{next(counter)}")

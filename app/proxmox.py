@@ -16,7 +16,7 @@ class ProxmoxError(Exception):
         self.status = status
 
 
-def build_vm_params(cfg: VmConfig, import_volid: str, tag: str | None = None) -> dict:
+def build_vm_params(cfg: VmConfig, import_volid: str, tag: str | None = None, iso_volid: str | None = None) -> dict:
     params: dict = {
         "cpu": cfg.cpu_type,
         "cores": cfg.cores,
@@ -33,6 +33,8 @@ def build_vm_params(cfg: VmConfig, import_volid: str, tag: str | None = None) ->
     }
     if tag:
         params["tags"] = tag
+    if iso_volid:
+        params["ide2"] = f"{iso_volid},media=cdrom"  # config drive voor cloud-init
     for i, disk in enumerate(cfg.extra_disks, start=1):  # lege data-disks, bv. /var van FortiManager/FortiAnalyzer
         params[f"scsi{i}"] = f"{disk.datastore or cfg.datastore}:{disk.size_gb}"
     for i, nic in enumerate(cfg.nics):
@@ -120,17 +122,25 @@ class ProxmoxClient:
             raise
         return True
 
-    def upload_import(
+    def upload_import(self, node: str, storage: str, path: Path, filename: str, on_progress: Callable[[float, float], None]) -> str:
+        return self.upload_file(node, storage, path, filename, "import", on_progress)
+
+    def iso_storages(self, node: str) -> list[str]:
+        rows = self._req("GET", f"/nodes/{node}/storage", params={"content": "iso"}) or []
+        return [s["storage"] for s in rows]
+
+    def upload_file(
         self,
         node: str,
         storage: str,
         path: Path,
         filename: str,
+        content: str,
         on_progress: Callable[[float, float], None],
     ) -> str:
         boundary = "----proxlaber" + str(time.time_ns())
         head = (
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"content\"\r\n\r\nimport\r\n"
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"content\"\r\n\r\n{content}\r\n"
             f"--{boundary}\r\nContent-Disposition: form-data; name=\"filename\"; filename=\"{filename}\"\r\n"
             "Content-Type: application/octet-stream\r\n\r\n"
         ).encode()

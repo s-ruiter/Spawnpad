@@ -80,3 +80,24 @@ def test_failed_create_cleans_up(client, app, fake_server):
     job = client.get(f"/api/deployments/{jid}").json()
     assert job["status"] == "failed" and "create failed" in job["error"]
     assert "delete_volume" in fake_state["log"] and fake_state["vms"] == {}
+
+
+def test_day0_cloudinit_against_fake_proxmox(client, app, fake_server):
+    url, fake_state = fake_server()
+    sid = client.post("/api/servers", json={"name": "fake", "url": url, "token_id": "root@pam!t", "token_secret": "x", "verify_tls": True}).json()["id"]
+    up = client.post("/api/uploads", files={"file": ("fgt.qcow2", make_qcow2(1024**3, pad=1024))}).json()
+    r = client.post("/api/batches", json={"server_id": sid, "items": [{
+        "upload_id": up["upload_id"], "candidate": "fgt.qcow2", "count": 2,
+        "config": {"name": "fgt", "node": "pve1", "datastore": "local-lvm", "import_storage": "local", "iso_storage": "local",
+                   "disk_gb": 2, "nics": [{"bridge": "vmbr0"}]},
+        "day0": {"product": "fortigate", "network": {"mode": "static", "ip": "10.0.0.11/24", "gateway": "10.0.0.1"},
+                 "tokens": ["AAAA1111", "BBBB2222"]},
+    }]})
+    assert r.status_code == 201, r.text
+    jobs = r.json()["jobs"]
+    for j in jobs:
+        app.state.job_manager.wait(j["id"], timeout=30)
+    batch = client.get(f"/api/batches/{r.json()['id']}").json()
+    assert [j["status"] for j in batch["jobs"]] == ["done", "done"], batch
+    assert sorted(u["content"] for u in fake_state["uploads"]) == ["import", "import", "iso", "iso"]
+    assert all(v["ide2"].endswith(",media=cdrom") and "/proxlaber-" in v["ide2"] for v in fake_state["vms"].values())

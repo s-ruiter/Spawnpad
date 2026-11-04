@@ -340,7 +340,7 @@ function createVmBlock(shared, onChange, onRemove) {
 
 // ---- Voortgang -------------------------------------------------------------------
 const STEPS = [
-  ["ontvangen", "Bestand ontvangen"], ["uitgepakt", "Image klaar"], ["uploaden", "Uploaden naar Proxmox"],
+  ["ontvangen", "Bestand ontvangen"], ["uitgepakt", "Image klaar"], ["uploaden", "Uploaden naar Proxmox"], ["cloudinit", "Day-0 configuratie"],
   ["vm_aanmaken", "VM aanmaken"], ["disk_importeren", "Disk importeren"], ["resize", "Disk vergroten"],
   ["netwerk_boot", "Netwerk en boot instellen"], ["klaar", "Klaar"],
 ];

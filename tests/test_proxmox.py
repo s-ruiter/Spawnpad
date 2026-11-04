@@ -181,3 +181,33 @@ def test_build_vm_params_extra_disks():
 
 def test_no_extra_disks_by_default():
     assert "scsi1" not in build_vm_params(_cfg(), "local:import/x.qcow2")
+
+
+def test_upload_file_sends_given_content_type(tmp_path):
+    f = tmp_path / "a.iso"
+    f.write_bytes(b"x" * 1000)
+    seen = {}
+
+    def h(req):
+        body = req.read()
+        seen["body"] = body
+        return ok("UPID:iso")
+
+    make(h).upload_file("pve1", "local", f, "a.iso", "iso", lambda frac, bps: None)
+    assert b'name="content"\r\n\r\niso\r\n' in seen["body"] and b'filename="a.iso"' in seen["body"]
+
+
+def test_build_vm_params_attaches_iso_as_cdrom():
+    p = build_vm_params(_cfg(), "local:import/x.qcow2", iso_volid="local:iso/c.iso")
+    assert p["ide2"] == "local:iso/c.iso,media=cdrom"
+    assert "ide2" not in build_vm_params(_cfg(), "local:import/x.qcow2")
+
+
+def test_iso_storages_lists_storages_that_allow_iso():
+    seen = {}
+
+    def h(req):
+        seen["q"] = dict(req.url.params)
+        return ok([{"storage": "local"}])
+
+    assert make(h).iso_storages("pve1") == ["local"] and seen["q"] == {"content": "iso"}

@@ -59,7 +59,8 @@ from pydantic import BaseModel  # noqa: E402
 
 from .proxmox import ProxmoxError  # noqa: E402
 from .routes_servers import get_server  # noqa: E402
-from .schemas import BatchIn, VmConfig  # noqa: E402
+from . import cloudinit  # noqa: E402
+from .schemas import BatchIn, Day0Spec, VmConfig  # noqa: E402
 
 
 class DeployIn(BaseModel):
@@ -117,6 +118,27 @@ def create_batch(body: BatchIn, request: Request) -> dict:
     except ProxmoxError as e:
         raise HTTPException(502, e.detail)
     return {"id": batch_id, "jobs": jobs}
+
+
+class PreviewIn(BaseModel):
+    day0: Day0Spec
+    name: str
+    n: int = 1
+    count: int = 1
+
+
+@router.post("/cloudinit/preview")
+def cloudinit_preview(body: PreviewIn) -> dict:
+    """Toont de user_data die voor VM n gebouwd wordt, met wachtwoord en token afgeschermd."""
+    if not 1 <= body.n <= body.count <= 20:
+        raise HTTPException(422, "Ongeldig aantal")
+    try:
+        cloudinit.pick_tokens(body.day0.tokens, body.count)  # valideert aantal en tekens
+        masked = body.day0.model_copy(update={"admin_password": "********" if body.day0.admin_password else None})
+        token = "XXXXXXXXXXXXXXXXXXXX" if any(t.strip() for t in body.day0.tokens) else None
+        return {"user_data": cloudinit.render_user_data(masked, body.name, body.n, body.count, token)}
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 @router.get("/batches/{batch_id}")
@@ -210,7 +232,7 @@ def server_nodes(server_id: int, request: Request) -> list[str]:
 
 @router.get("/servers/{server_id}/nodes/{node}/storages")
 def server_storages(server_id: int, node: str, request: Request) -> dict:
-    return _lookup(request, server_id, lambda c: {"storages": c.storages(node), "import_storages": c.import_storages(node)})
+    return _lookup(request, server_id, lambda c: {"storages": c.storages(node), "import_storages": c.import_storages(node), "iso_storages": c.iso_storages(node)})
 
 
 @router.get("/servers/{server_id}/nodes/{node}/bridges")

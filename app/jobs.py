@@ -6,9 +6,9 @@ import time
 import uuid
 from typing import Callable
 
-from . import db, images
+from . import cloudinit, db, images
 from .config import Settings
-from .deploy import import_filename, run_deployment, vm_tag
+from .deploy import import_filename, iso_filename, run_deployment, vm_tag
 from .schemas import BatchItem, VmConfig
 
 
@@ -83,20 +83,29 @@ class JobManager:
         return self._launch(conn, server, cfg, image, upload_id, candidate, None)
 
     def start_batch(self, conn, server_id: int, items: list[BatchItem]) -> tuple[str, list[dict]]:
-        """Alles wordt eerst gevalideerd; pas daarna starten de jobs (alles of niets)."""
+        """Alles wordt eerst gevalideerd (ook de Day-0 configuratie); pas daarna starten de jobs (alles of niets)."""
         server = self._server(conn, server_id)
-        prepared = [(it, self._prepare(server, it.config, it.upload_id, it.candidate, it.count)) for it in items]
+        plan = []  # (item, image, [(naam, VmConfig)])
+        for it in items:
+            image = self._prepare(server, it.config, it.upload_id, it.candidate, it.count)
+            tokens = cloudinit.pick_tokens(it.day0.tokens, it.count) if it.day0 else [None] * it.count
+            if it.day0 and not it.config.iso_storage:
+                raise ValueError("Kies een storage met content-type ISO voor de Day-0 configuratie")
+            vms = []
+            for n in range(1, it.count + 1):
+                name = it.config.name if it.count == 1 else f"{it.config.name}-{n}"
+                update = {"name": name}
+                if it.day0:
+                    update["user_data"] = cloudinit.render_user_data(it.day0, name, n, it.count, tokens[n - 1])
+                vms.append(it.config.model_copy(update=update))
+            plan.append((it, image, vms))
         batch_id = uuid.uuid4().hex
         conn.execute("INSERT INTO batches(id,server_id,created_at) VALUES(?,?,?)", (batch_id, server_id, time.time()))
         conn.commit()
         jobs = []
-        for it, image in prepared:
-            for n in range(1, it.count + 1):
-                name = it.config.name if it.count == 1 else f"{it.config.name}-{n}"
-                if not self.NAME_RE.match(name):
-                    name = it.config.name  # kan alleen bij een naam van 62-63 tekens; de job faalt dan netjes bij Proxmox
-                cfg = it.config.model_copy(update={"name": name})
-                jobs.append({"id": self._launch(conn, server, cfg, image, it.upload_id, it.candidate, batch_id), "vm_name": name})
+        for it, image, vms in plan:
+            for cfg in vms:
+                jobs.append({"id": self._launch(conn, server, cfg, image, it.upload_id, it.candidate, batch_id), "vm_name": cfg.name})
         return batch_id, jobs
 
     def _vmid_lock(self, server_id: int) -> threading.Lock:
@@ -164,7 +173,7 @@ class JobManager:
                 server = conn.execute("SELECT * FROM servers WHERE id=?", (row["server_id"],)).fetchone()
                 cfg = meta["config"]
                 if server is not None:
-                    self._best_effort_cleanup(dict(server), row["node"], row["vmid"], cfg["import_storage"], row["id"])
+                    self._best_effort_cleanup(dict(server), row["node"], row["vmid"], cfg["import_storage"], row["id"], cfg.get("iso_storage"))
                 shutil.rmtree(self._upload_dir(meta["upload_id"]), ignore_errors=True)
                 conn.execute(
                     "UPDATE jobs SET status='failed', error=?, finished_at=? WHERE id=?",
@@ -178,7 +187,7 @@ class JobManager:
         finally:
             conn.close()
 
-    def _best_effort_cleanup(self, server: dict, node: str, vmid: int | None, storage: str, job_id: str) -> None:
+    def _best_effort_cleanup(self, server: dict, node: str, vmid: int | None, storage: str, job_id: str, iso_storage: str | None = None) -> None:
         try:
             client = self._get_factory()(server)
         except Exception:
@@ -195,6 +204,11 @@ class JobManager:
                 client.delete_volume(node, storage, f"{storage}:import/{import_filename(job_id)}")
             except Exception:
                 pass
+            if iso_storage:
+                try:
+                    client.delete_volume(node, iso_storage, f"{iso_storage}:iso/{iso_filename(job_id)}")
+                except Exception:
+                    pass
         finally:
             try:
                 client.close()

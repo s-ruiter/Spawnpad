@@ -75,12 +75,19 @@ def test_shared_upload_survives_until_last_job_finishes(client, app):
     sid = start(client, app, Gated())
     up = upload(client)
     body = client.post("/api/batches", json={"server_id": sid, "items": [item(up, count=2)]}).json()
-    j1, j2 = body["jobs"]
-    app.state.job_manager.wait(j2["id"])  # tweede job is klaar, de eerste hangt nog
+    ids = [j["id"] for j in body["jobs"]]
+    import time as _t
+    for _ in range(200):  # wachten tot een van de twee jobs bij de upload vastzit
+        if seen:
+            break
+        _t.sleep(0.01)
+    blocked = next(i for i in ids if f"proxlaber-{i}.qcow2" == seen[0])
+    other = next(i for i in ids if i != blocked)
+    app.state.job_manager.wait(other)  # de andere job is klaar, de eerste hangt nog
     d = app.state.settings.temp_dir / "uploads" / up["upload_id"]
     assert d.exists()
     gate.set()
-    app.state.job_manager.wait(j1["id"])
+    app.state.job_manager.wait(blocked)
     assert not d.exists()
 
 
@@ -143,3 +150,122 @@ def test_migration_adds_batch_id_to_existing_db(tmp_path):
     assert "batch_id" in cols
     assert conn.execute("SELECT id FROM jobs").fetchone()["id"] == "old1"
     assert conn.execute("SELECT name FROM sqlite_master WHERE name='batches'").fetchone()
+
+
+def iso_user_data(iso_bytes: bytes) -> str:
+    import io
+
+    import pycdlib
+
+    iso = pycdlib.PyCdlib()
+    iso.open_fp(io.BytesIO(iso_bytes))
+    out = io.BytesIO()
+    iso.get_file_from_iso_fp(out, rr_path="/openstack/latest/user_data")
+    iso.close()
+    return out.getvalue().decode("ascii")
+
+
+def day0(**kw):
+    base = {"product": "fortigate", "hostname": "{name}", "admin_password": "Sup3rS3cret",
+            "network": {"mode": "static", "ip": "10.0.0.11/24", "gateway": "10.0.0.1", "dns": ["1.1.1.1"]},
+            "custom_cli": "config system global\n set timezone 26\nend", "tokens": ["AAAA1111", "BBBB2222"]}
+    base.update(kw)
+    return base
+
+
+def ci_item(up, count=2, d0=None, **cfg):
+    it = item(up, count=count, iso_storage="local", **cfg)
+    it["day0"] = d0 or day0()
+    return it
+
+
+def test_day0_is_rendered_per_vm_and_attached(client, app):
+    fake = FakeClient()
+    sid = start(client, app, fake)
+    body = client.post("/api/batches", json={"server_id": sid, "items": [ci_item(upload(client), name="fgt")]}).json()
+    wait_all(app, body["jobs"])
+    texts = [iso_user_data(data) for _, _, _, data in fake.iso_uploads]
+    assert len(texts) == 2
+    first = next(t for t in texts if "10.0.0.11" in t)
+    second = next(t for t in texts if "10.0.0.12" in t)
+    assert "AAAA1111" in first and "BBBB2222" in second
+    assert "set hostname fgt-1" in first and "set hostname fgt-2" in second
+    assert "set timezone 26" in first
+    assert all(p.get("ide2", "").endswith("media=cdrom") for p in fake.created_params)
+
+
+def test_token_count_must_match_vm_count(client, app):
+    sid = start(client, app)
+    r = client.post("/api/batches", json={"server_id": sid, "items": [ci_item(upload(client), count=3)]})
+    assert r.status_code == 422 and "tokens" in r.json()["detail"]
+
+
+def test_day0_requires_iso_storage(client, app):
+    sid = start(client, app)
+    it = item(upload(client), count=2)
+    it["day0"] = day0()
+    r = client.post("/api/batches", json={"server_id": sid, "items": [it]})
+    assert r.status_code == 422 and "ISO" in r.json()["detail"]
+
+
+def test_static_ip_outside_subnet_is_rejected_up_front(client, app):
+    sid = start(client, app)
+    d0 = day0(network={"mode": "static", "ip": "10.0.0.254/24", "gateway": "10.0.0.1", "dns": []}, tokens=[])
+    r = client.post("/api/batches", json={"server_id": sid, "items": [ci_item(upload(client), count=3, d0=d0)]})
+    assert r.status_code == 422 and "subnet" in r.json()["detail"]
+    assert client.get("/api/deployments").json() == []
+
+
+def test_secrets_are_not_persisted_or_returned(client, app):
+    sid = start(client, app)
+    body = client.post("/api/batches", json={"server_id": sid, "items": [ci_item(upload(client), name="fgt")]}).json()
+    wait_all(app, body["jobs"])
+    rows = app.state.conn.execute("SELECT config_json FROM jobs").fetchall()
+    dump = " ".join(r["config_json"] for r in rows)
+    for secret in ("Sup3rS3cret", "AAAA1111", "BBBB2222", "user_data"):
+        assert secret not in dump
+    api = client.get(f"/api/batches/{body['id']}").text + client.get("/api/deployments").text
+    for secret in ("Sup3rS3cret", "AAAA1111", "BBBB2222"):
+        assert secret not in api
+
+
+def test_recovery_deletes_the_iso_volume(client, app):
+    import json
+    import time
+
+    fake = FakeClient()
+    sid = start(client, app, fake)
+    up = upload(client)
+    conn = app.state.conn
+    conn.execute(
+        "INSERT INTO jobs(id,server_id,node,vm_name,vmid,config_json,status,created_at) VALUES('j9',?,?,?,?,?,?,?)",
+        (sid, "pve1", "fgt", None,
+         json.dumps({"config": cfgbody(iso_storage="isostore"), "candidate": "fgt.qcow2", "upload_id": up["upload_id"]}), "running", time.time()),
+    )
+    conn.commit()
+    app.state.job_manager.recover_on_startup()
+    assert "isostore:iso/proxlaber-j9.iso" in fake.volumes_deleted
+
+
+def test_preview_masks_secrets(client, app):
+    r = client.post("/api/cloudinit/preview", json={"day0": day0(), "name": "fgt", "n": 1, "count": 2})
+    assert r.status_code == 200
+    text = r.json()["user_data"]
+    assert "set hostname fgt-1" in text or "set hostname fgt" in text
+    assert "Sup3rS3cret" not in text and "AAAA1111" not in text and "BBBB2222" not in text
+    assert "LICENSE-TOKEN" in text
+
+
+def test_preview_reports_errors(client, app):
+    r = client.post("/api/cloudinit/preview", json={"day0": day0(tokens=["AAAA1111"]), "name": "fgt", "n": 1, "count": 2})
+    assert r.status_code == 422
+
+
+def test_node_storages_list_includes_iso_storages(client, app):
+    class C(FakeClient):
+        def storages(self, node): return [{"name": "local-lvm", "avail": 1}]
+        def import_storages(self, node): return ["local"]
+        def iso_storages(self, node): return ["local"]
+
+    sid = start(client, app, C())
+    assert client.get(f"/api/servers/{sid}/nodes/pve1/storages").json()["iso_storages"] == ["local"]
