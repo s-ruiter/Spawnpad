@@ -1,3 +1,4 @@
+import contextlib
 import time
 from pathlib import Path
 from typing import Callable
@@ -24,6 +25,8 @@ def run_deployment(
     job_id: str, client, cfg: VmConfig, image: Path, emit: Emit,
     on_vmid: "Callable[[int], None] | None" = None,
     cleanup_delay: float = 2.0,
+    vmid_lock=None,
+    reserve_poll: float = 0.5,
 ) -> int:
     node = cfg.node
     remote_name = import_filename(job_id)
@@ -50,8 +53,6 @@ def run_deployment(
             if not client.vmid_free(cfg.vmid):
                 raise ProxmoxError(f"VMID {cfg.vmid} is al in gebruik")
             vmid = cfg.vmid
-        else:
-            vmid = client.next_vmid()
 
         run("uploaden", "Uploaden naar Proxmox")
         last = {"p": -1.0}
@@ -66,20 +67,29 @@ def run_deployment(
         client.wait_task(node, upid)
         done("uploaden", "Upload klaar")
 
-        run("vm_aanmaken", f"VM {vmid} aanmaken")
-        for attempt in range(3):
-            try:
-                upid = client.create_vm(node, vmid, cfg.name, build_vm_params(cfg, volid, tag))
-                break
-            except ProxmoxError as e:
-                if cfg.vmid is None and attempt < 2 and "exist" in e.detail.lower():
+        run("vm_aanmaken", "VM aanmaken")
+        # next_vmid() reserveert niets: bij parallelle uitrollen alloceren en aanmaken we onder een slot en wachten
+        # we tot Proxmox het VMID als bezet toont, zodat de volgende job een ander nummer krijgt.
+        with (vmid_lock if vmid_lock is not None else contextlib.nullcontext()):
+            for attempt in range(5):
+                if cfg.vmid is None:
                     vmid = client.next_vmid()
-                    continue
-                raise
-        vm_created = True
-        if on_vmid:
-            on_vmid(vmid)
-        done("vm_aanmaken")
+                try:
+                    upid = client.create_vm(node, vmid, cfg.name, build_vm_params(cfg, volid, tag))
+                    break
+                except ProxmoxError as e:
+                    if cfg.vmid is None and attempt < 4 and "exist" in e.detail.lower():
+                        continue
+                    raise
+            vm_created = True
+            if on_vmid:
+                on_vmid(vmid)
+            if vmid_lock is not None:
+                for _ in range(10):
+                    if not client.vmid_free(vmid):
+                        break
+                    time.sleep(reserve_poll)
+        done("vm_aanmaken", f"VM {vmid}")
 
         run("disk_importeren", f"Disk importeren naar {cfg.datastore}")
         client.wait_task(node, upid)

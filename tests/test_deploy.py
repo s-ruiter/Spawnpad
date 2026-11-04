@@ -257,3 +257,51 @@ def test_cleanup_retries_locked_vm(image):
     with pytest.raises(ProxmoxError):
         run_deployment("j1", c, cfg(), image, Events(), cleanup_delay=0)
     assert c.calls.count("delete_vm") == 3
+
+
+class RecordingLock:
+    def __init__(self, log):
+        self.log = log
+
+    def __enter__(self):
+        self.log.append("lock_enter")
+
+    def __exit__(self, *a):
+        self.log.append("lock_exit")
+
+
+def test_vmid_allocation_and_create_are_serialized_by_lock(image):
+    class C(FakeClient):
+        def __init__(self, log):
+            super().__init__()
+            self.log = log
+            self.n = 0
+
+        def next_vmid(self):
+            self.log.append("next_vmid")
+            return 105
+
+        def create_vm(self, node, vmid, name, params):
+            self.log.append("create_vm")
+            return "UPID:c"
+
+        def vmid_free(self, vmid):
+            # VMID geldt pas als 'bezet' nadat Proxmox de config heeft aangemaakt: tweede poll
+            self.n += 1
+            self.log.append("vmid_free")
+            return self.n < 2
+
+        def upload_import(self, *a, **k):
+            self.log.append("upload")
+            return "UPID:up"
+
+    log = []
+    run_deployment("j1", C(log), cfg(), image, Events(), vmid_lock=RecordingLock(log), reserve_poll=0)
+    # upload gebeurt buiten het slot; next_vmid, create_vm en het wachten op reservering erbinnen
+    assert log == ["upload", "lock_enter", "next_vmid", "create_vm", "vmid_free", "vmid_free", "lock_exit"]
+
+
+def test_without_lock_there_is_no_reservation_wait(image):
+    c = FakeClient()
+    run_deployment("j1", c, cfg(), image, Events())
+    assert c.calls.count("vmid_free") == 0

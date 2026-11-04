@@ -21,7 +21,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     status TEXT NOT NULL,
     error TEXT,
     created_at REAL NOT NULL,
-    finished_at REAL
+    finished_at REAL,
+    batch_id TEXT
+);
+CREATE TABLE IF NOT EXISTS batches (
+    id TEXT PRIMARY KEY,
+    server_id INTEGER,
+    created_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS job_events (
     id INTEGER PRIMARY KEY,
@@ -56,4 +62,8 @@ def connect(path: Path) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    # migratie voor databases van vóór batches
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
+    if "batch_id" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN batch_id TEXT")
     conn.commit()

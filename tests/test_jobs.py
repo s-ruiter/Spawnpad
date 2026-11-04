@@ -108,15 +108,10 @@ def test_recover_marks_running_jobs_failed_and_cleans_up(client, app):
 
 
 def test_two_parallel_deployments_get_distinct_vmids(client, app):
-    barrier = threading.Barrier(2)
     used, lock = set(), threading.Lock()
-    first = threading.local()
 
     class C(FakeClient):
         def next_vmid(self):
-            if not getattr(first, "done", False):
-                first.done = True
-                barrier.wait(timeout=5)
             with lock:
                 return min(i for i in range(100, 200) if i not in used)
 
@@ -126,6 +121,10 @@ def test_two_parallel_deployments_get_distinct_vmids(client, app):
                     raise ProxmoxError(f"VM {vmid} already exists", status=500)
                 used.add(vmid)
             return "UPID:c"
+
+        def vmid_free(self, vmid):
+            with lock:
+                return vmid not in used
 
     fake = C()
     sid, up1 = setup(client, app, fake)

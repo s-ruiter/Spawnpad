@@ -16,7 +16,9 @@ def app(tmp_path):
     from app.config import Settings
     from app.main import create_app
 
-    return create_app(Settings(data_dir=tmp_path))
+    app = create_app(Settings(data_dir=tmp_path))
+    app.state.job_manager.reserve_poll = 0  # FakeClient meldt een VMID nooit als bezet; niet 5s wachten per job
+    return app
 
 
 @pytest.fixture

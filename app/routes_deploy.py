@@ -59,7 +59,7 @@ from pydantic import BaseModel  # noqa: E402
 
 from .proxmox import ProxmoxError  # noqa: E402
 from .routes_servers import get_server  # noqa: E402
-from .schemas import VmConfig  # noqa: E402
+from .schemas import BatchIn, VmConfig  # noqa: E402
 
 
 class DeployIn(BaseModel):
@@ -74,7 +74,7 @@ def _event(row) -> dict:
 
 
 def _job(row) -> dict:
-    return {k: row[k] for k in ("id", "server_id", "node", "vm_name", "vmid", "status", "error", "created_at", "finished_at")}
+    return {k: row[k] for k in ("id", "server_id", "node", "vm_name", "vmid", "status", "error", "created_at", "finished_at", "batch_id")}
 
 
 def _get_job(conn, job_id: str):
@@ -101,6 +101,45 @@ def create_deployment(body: DeployIn, request: Request) -> dict:
     except ProxmoxError as e:
         raise HTTPException(502, e.detail)
     return {"id": job_id}
+
+
+@router.post("/batches", status_code=201)
+def create_batch(body: BatchIn, request: Request) -> dict:
+    for it in body.items:
+        if not _ID.match(it.upload_id):
+            raise HTTPException(404, "Upload niet gevonden")
+    try:
+        batch_id, jobs = request.app.state.job_manager.start_batch(request.app.state.conn, body.server_id, body.items)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except ProxmoxError as e:
+        raise HTTPException(502, e.detail)
+    return {"id": batch_id, "jobs": jobs}
+
+
+@router.get("/batches/{batch_id}")
+def get_batch(batch_id: str, request: Request) -> dict:
+    conn = request.app.state.conn
+    batch = conn.execute(
+        "SELECT b.*, s.name AS server_name FROM batches b LEFT JOIN servers s ON s.id=b.server_id WHERE b.id=?", (batch_id,)
+    ).fetchone()
+    if batch is None:
+        raise HTTPException(404, "Batch niet gevonden")
+    jobs = []
+    for j in conn.execute("SELECT * FROM jobs WHERE batch_id=? ORDER BY created_at, rowid", (batch_id,)).fetchall():
+        last = conn.execute("SELECT * FROM job_events WHERE job_id=? ORDER BY id DESC LIMIT 1", (j["id"],)).fetchone()
+        # voortgang van de upload staat in het laatste 'uploaden'-event met een percentage
+        prog = conn.execute(
+            "SELECT progress FROM job_events WHERE job_id=? AND step='uploaden' AND progress IS NOT NULL ORDER BY id DESC LIMIT 1", (j["id"],)
+        ).fetchone()
+        jobs.append({
+            **_job(j),
+            "step": last["step"] if last else None, "state": last["state"] if last else None,
+            "message": last["message"] if last else "", "upload_progress": prog["progress"] if prog else None,
+        })
+    return {"id": batch["id"], "created_at": batch["created_at"], "server_name": batch["server_name"], "jobs": jobs}
 
 
 @router.get("/deployments")

@@ -56,3 +56,15 @@ class Candidate(BaseModel):
 class UploadInfo(BaseModel):
     upload_id: str
     candidates: list[Candidate]
+
+
+class BatchItem(BaseModel):
+    upload_id: str
+    candidate: str
+    count: int = Field(1, ge=1, le=20)
+    config: VmConfig
+
+
+class BatchIn(BaseModel):
+    server_id: int
+    items: list[BatchItem] = Field(min_length=1, max_length=20)
