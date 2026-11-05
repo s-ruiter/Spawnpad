@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Creates an LXC container on this Proxmox host and installs Proxlaber in it.
+# Creates an LXC container on this Proxmox host and installs Spawnpad in it.
 # Run as root in the Proxmox host shell, for example:
 #   bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)"
 # or from an extracted copy of the project:  bash deploy/install.sh
@@ -94,7 +94,7 @@ CORES="${CORES:-2}"
 CT_PASSWORD="${CT_PASSWORD:-}"
 
 if [ -z "$ASSUME_YES" ]; then
-  echo "Installing Proxlaber as an LXC. Enter accepts the value in [brackets]."
+  echo "Installing Spawnpad as an LXC. Enter accepts the value in [brackets]."
   echo
   ask CTID "Container ID" "$CTID"
   ask CT_HOSTNAME "Hostname" "$CT_HOSTNAME"
@@ -246,5 +246,5 @@ pct exec "$CTID" -- bash -euo pipefail -c '
 
 IP="$(pct exec "$CTID" -- hostname -I | awk '{print $1}')"
 echo
-echo "Done. Proxlaber is running at http://${IP}:8080"
+echo "Done. Spawnpad is running at http://${IP}:8080"
 echo "Update later:  pct exec ${CTID} -- bash -c 'cd /opt/proxlaber && runuser -u proxlaber -- git pull -q && .venv/bin/pip install -q . && systemctl restart proxlaber'"

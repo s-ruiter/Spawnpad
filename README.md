@@ -1,4 +1,6 @@
-# Proxlaber
+# Spawnpad
+
+*(Formerly Proxlaber. Internally the paths, service name and repo are still `proxlaber`.)*
 
 A light web app to deploy a **qcow2** or **zip** (for example a Fortinet KVM image) as a VM on one of several Proxmox servers from a single screen, with live progress.
 

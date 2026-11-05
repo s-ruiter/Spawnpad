@@ -14,7 +14,7 @@ from .routes_servers import router as servers_router
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    app = FastAPI(title="Proxlaber")
+    app = FastAPI(title="Spawnpad")
     settings.temp_dir.mkdir(parents=True, exist_ok=True)
     conn = db.connect(settings.db_path)
     db.init_schema(conn)
