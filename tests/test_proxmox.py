@@ -59,7 +59,8 @@ def test_build_vm_params_fortigate_defaults():
     assert p["scsi0"] == "local-lvm:0,import-from=local:import/x.qcow2"
     assert p["net0"] == "virtio,bridge=vmbr0,tag=10"
     assert p["net1"] == "virtio,bridge=vmbr1"
-    assert p["start"] == 0 and p["serial0"] == "socket"
+    assert p["start"] == 0
+    assert "serial0" not in p and "vga" not in p and "scsihw" not in p  # Proxmox-standaarden
 
 
 def test_wait_task_raises_on_failed_exitstatus():

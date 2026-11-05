@@ -196,7 +196,7 @@ function createVmBlock(shared, onChange, onRemove) {
   const extraBox = h("div", { class: "tight" });
   const machine = h("input", { value: "pc" });
   const bios = select(["seabios", "ovmf"], "seabios");
-  const scsihw = select(["virtio-scsi-single", "virtio-scsi-pci", "lsi"], "virtio-scsi-single");
+  const scsihw = select([["", "Standaard (Proxmox)"], "virtio-scsi-single", "virtio-scsi-pci", "lsi"], "");
   const nicModel = select(["virtio", "e1000", "vmxnet3"], "virtio");
   const vmidIn = h("input", { type: "number", min: 100, placeholder: "automatisch" });
   const startAfter = h("input", { type: "checkbox" });

@@ -42,7 +42,7 @@ class VmConfig(BaseModel):
     cpu_type: str = "host"
     bios: str = "seabios"
     machine: str = "pc"
-    scsihw: str = "virtio-scsi-single"
+    scsihw: str = ""  # leeg = standaard van Proxmox
     nics: list[NicConfig]
     extra_disks: list[ExtraDisk] = Field(default_factory=list, max_length=14)
     iso_storage: str | None = None  # storage voor de Day-0 config-drive-ISO

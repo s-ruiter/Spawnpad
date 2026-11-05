@@ -23,14 +23,13 @@ def build_vm_params(cfg: VmConfig, import_volid: str, tag: str | None = None, is
         "memory": cfg.memory_mb,
         "bios": cfg.bios,
         "machine": cfg.machine,
-        "scsihw": cfg.scsihw,
         "ostype": "l26",
         "scsi0": f"{cfg.datastore}:0,import-from={import_volid}",
         "boot": "order=scsi0",
-        "serial0": "socket",
-        "vga": "serial0",
         "start": 0,
     }
+    if cfg.scsihw:  # leeg = Proxmox-standaard
+        params["scsihw"] = cfg.scsihw
     if tag:
         params["tags"] = tag
     if iso_volid:
