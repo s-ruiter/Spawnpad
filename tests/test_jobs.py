@@ -102,7 +102,7 @@ def test_recover_marks_running_jobs_failed_and_cleans_up(client, app):
     conn.commit()
     app.state.job_manager.recover_on_startup()
     job = client.get("/api/deployments/j9").json()
-    assert job["status"] == "failed" and "herstart" in job["error"]
+    assert job["status"] == "failed" and "restart" in job["error"]
     assert "delete_vm" in fake.calls and "delete_volume" in fake.calls
     assert not (app.state.settings.temp_dir / "uploads" / up["upload_id"]).exists()
 

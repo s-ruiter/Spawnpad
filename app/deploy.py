@@ -10,7 +10,7 @@ from .schemas import VmConfig
 STEPS = ["ontvangen", "uitgepakt", "uploaden", "cloudinit", "vm_aanmaken", "disk_importeren", "resize", "netwerk_boot", "klaar"]
 
 def import_filename(job_id: str) -> str:
-    """Unieke naam op de import-storage, zodat gelijktijdige uitrollen elkaars bestand niet raken."""
+    """Unique name on the import storage, so concurrent deployments do not touch each other's file."""
     return f"proxlaber-{job_id}.qcow2"
 
 
@@ -53,15 +53,15 @@ def run_deployment(
         emit(name, "done", message, 1.0 if name == "uploaden" else None)
 
     try:
-        emit("ontvangen", "done", "Bestand ontvangen", None)
+        emit("ontvangen", "done", "File received", None)
         emit("uitgepakt", "done", image.name, None)
 
         if cfg.vmid is not None:
             if not client.vmid_free(cfg.vmid):
-                raise ProxmoxError(f"VMID {cfg.vmid} is al in gebruik")
+                raise ProxmoxError(f"VMID {cfg.vmid} is already in use")
             vmid = cfg.vmid
 
-        run("uploaden", "Uploaden naar Proxmox")
+        run("uploaden", "Uploading to Proxmox")
         last = {"p": -1.0}
 
         def on_progress(frac: float, bps: float) -> None:
@@ -72,12 +72,12 @@ def run_deployment(
         uploaded = True
         upid = client.upload_import(node, cfg.import_storage, image, remote_name, on_progress)
         client.wait_task(node, upid)
-        done("uploaden", "Upload klaar")
+        done("uploaden", "Upload complete")
 
         run("cloudinit", "Day-0 configuratie")
         if cfg.user_data is not None:
             if not cfg.iso_storage:
-                raise ProxmoxError("Voor de Day-0 configuratie is een ISO-storage nodig")
+                raise ProxmoxError("An ISO storage is required for the Day-0 configuration")
             iso_path = image.parent / iso_name
             cloudinit.build_config_drive(cfg.user_data, iso_path)
             iso_uploaded = True
@@ -86,9 +86,9 @@ def run_deployment(
             finally:
                 iso_path.unlink(missing_ok=True)
             client.wait_task(node, iso_upid)
-            done("cloudinit", "Config-drive geüpload")
+            done("cloudinit", "Config drive uploaded")
         else:
-            done("cloudinit", "Niet ingesteld")
+            done("cloudinit", "Not configured")
 
         run("vm_aanmaken", "VM aanmaken")
         # next_vmid() reserveert niets: bij parallelle uitrollen alloceren en aanmaken we onder een slot en wachten
@@ -114,7 +114,7 @@ def run_deployment(
                     time.sleep(reserve_poll)
         done("vm_aanmaken", f"VM {vmid}")
 
-        run("disk_importeren", f"Disk importeren naar {cfg.datastore}")
+        run("disk_importeren", f"Importing disk to {cfg.datastore}")
         client.wait_task(node, upid)
         done("disk_importeren")
 
@@ -123,9 +123,9 @@ def run_deployment(
             resize_upid = client.resize_disk(node, vmid, "scsi0", cfg.disk_gb)
             if isinstance(resize_upid, str) and resize_upid.startswith("UPID"):
                 client.wait_task(node, resize_upid)
-            done("resize", f"Disk vergroot naar {cfg.disk_gb} GB")
+            done("resize", f"Disk resized to {cfg.disk_gb} GB")
         else:
-            done("resize", "Geen vergroting nodig")
+            done("resize", "No resize needed")
 
         run("netwerk_boot")
         if cfg.start_after:
@@ -135,9 +135,9 @@ def run_deployment(
         try:
             client.delete_volume(node, cfg.import_storage, volid)
         except ProxmoxError as e:
-            emit("klaar", "running", f"Waarschuwing: import-bestand niet verwijderd: {e.detail}", None)
+            emit("klaar", "running", f"Warning: import file not removed: {e.detail}", None)
 
-        emit("klaar", "done", f"VM {vmid} is klaar", None)
+        emit("klaar", "done", f"VM {vmid} is ready", None)
         return vmid
     except Exception as e:
         message = getattr(e, "detail", None) or str(e)

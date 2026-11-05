@@ -117,7 +117,7 @@ def test_count_limits(client, app):
 def test_invalid_vm_name_is_rejected(client, app):
     sid = start(client, app)
     r = client.post("/api/batches", json={"server_id": sid, "items": [item(upload(client), name="fgt lab_1")]})
-    assert r.status_code == 422 and "naam" in r.json()["detail"].lower()
+    assert r.status_code == 422 and "name" in r.json()["detail"].lower()
 
 
 def test_unknown_upload_is_404(client, app):

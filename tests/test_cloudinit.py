@@ -69,7 +69,7 @@ def test_fortimanager_cli_uses_its_own_syntax():
 
 
 def test_fortimanager_needs_static_ip():
-    with pytest.raises(ValueError, match="vast IP"):
+    with pytest.raises(ValueError, match="static IP"):
         ci.render_cli(spec(product="fortimanager", hostname="fmg"), name="fmg", n=1, count=1)
 
 

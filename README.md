@@ -1,66 +1,66 @@
 # Proxlaber
 
-Licht webprogramma om een **qcow2** of **zip** (bijvoorbeeld een Fortinet KVM-image) met één scherm als VM uit te rollen op een van meerdere Proxmox-servers, met live voortgang.
+A light web app to deploy a **qcow2** or **zip** (for example a Fortinet KVM image) as a VM on one of several Proxmox servers from a single screen, with live progress.
 
-Vereist **Proxmox VE 9 of nieuwer**. De app praat uitsluitend via de Proxmox-API (API-tokens), er is geen SSH nodig.
+Requires **Proxmox VE 9 or newer**. The app talks to Proxmox exclusively through the API (API tokens); no SSH is needed.
 
-## Installeren (LXC op een Proxmox-host)
+## Install (LXC on a Proxmox host)
 
-Open de shell van de Proxmox-host en draai als root:
+Open the Proxmox host shell and run as root:
 
 ```bash
 bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)"
 ```
 
-Het script start een **wizard** die vraagt naar container-ID, hostnaam, storage, bridge, VLAN, netwerk (DHCP of een vast IP-adres met gateway en DNS), schijfgrootte, geheugen, cores en een optioneel root-wachtwoord. Enter neemt de standaardwaarde over; invoer wordt gecontroleerd en je krijgt een samenvatting om te bevestigen. Daarna maakt het een Debian 12 container, haalt de code uit de repo (`git clone`), installeert de app als systemd-service en toont het adres (poort 8080).
+The script starts a **wizard** that asks for container ID, hostname, storage, bridge, VLAN, network (DHCP or a static IP address with gateway and DNS), disk size, memory, cores and an optional root password. Enter accepts the default; input is validated and you get a summary to confirm. It then creates a Debian 12 container, fetches the code from the repo (`git clone`), installs the app as a systemd service and shows the address (port 8080).
 
-Zonder vragen (bijvoorbeeld voor automatisering) gebruik je `--yes`; dan gelden omgevingsvariabelen en standaardwaarden:
+Without questions (for example for automation) use `--yes`; environment variables and defaults then apply:
 
 ```bash
 CT_IP=192.168.1.50/24 CT_GATEWAY=192.168.1.1 VLAN=20 STORAGE=ssd \
   bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)" -- --yes
 ```
 
-Beschikbare variabelen: `CTID`, `HOSTNAME_CT`, `STORAGE`, `BRIDGE`, `VLAN`, `CT_IP` (`dhcp` of `192.168.1.50/24`), `CT_GATEWAY`, `CT_DNS`, `CT_PASSWORD`, `DISK_GB`, `MEMORY`, `CORES`, `TEMPLATE_STORAGE`, `REPO_URL`, `BRANCH` (`main`). Staat de repo op privé, geef dan inloggegevens mee in `REPO_URL` (bijvoorbeeld `http://sander:TOKEN@10.10.100.3:8010/sander/ProxLaber.git`), of kopieer het project naar de host en draai `bash deploy/install.sh`; dan wordt de lokale code gebruikt.
+Available variables: `CTID`, `HOSTNAME_CT`, `STORAGE`, `BRIDGE`, `VLAN`, `CT_IP` (`dhcp` or `192.168.1.50/24`), `CT_GATEWAY`, `CT_DNS`, `CT_PASSWORD`, `DISK_GB`, `MEMORY`, `CORES`, `TEMPLATE_STORAGE`, `REPO_URL`, `BRANCH` (`main`). If the repo is private, put credentials in `REPO_URL` (for example `http://sander:TOKEN@10.10.100.3:8010/sander/ProxLaber.git`), or copy the project to the host and run `bash deploy/install.sh`; the local code is then used.
 
-De container heeft schijfruimte nodig voor tijdelijke uploads en het uitpakken van zips: reken bij een zip op minstens 3× de grootte van het bestand (upload, uitpakken en kopie), bij een losse qcow2 op 2× (`DISK_GB`). Verlaten uploads worden bij de eerstvolgende upload opgeruimd (na 6 uur). Bijwerken later (de container moet bij de git-server kunnen):
+The container needs disk space for temporary uploads and for extracting zips: for a zip plan at least 3× the file size (upload, extraction and copy), for a plain qcow2 2× (`DISK_GB`). Abandoned uploads are cleaned up on the next upload (after 6 hours). Updating later (the container must be able to reach the git server):
 
 ```bash
 pct exec <CTID> -- bash -c 'cd /opt/proxlaber && runuser -u proxlaber -- git pull -q && .venv/bin/pip install -q . && systemctl restart proxlaber'
 ```
 
-## Proxmox voorbereiden
+## Preparing Proxmox
 
-1. **API-token per server.** Maak een gebruiker en token aan (Datacenter → Permissions → API Tokens) en voeg de server toe op de pagina *Servers* met token-ID (`user@realm!naam`) en secret.
-2. **Rechten van het token.** Startpunt: de rollen `PVEVMAdmin` en `PVEDatastoreAdmin` op pad `/` (met *Propagate*). Minimaal nodig zijn onder meer `VM.Allocate`, `VM.Config.*`, `VM.Audit`, `Datastore.AllocateSpace`, `Datastore.AllocateTemplate`, `Datastore.Audit`, `Sys.Audit` en `SDN.Use` op de gebruikte bridges. Dit is niet getest tegen een echte PVE 9; geeft een stap een 403, dan toont de uitrol de Proxmox-melding en kun je het ontbrekende recht toevoegen.
-3. **Storage met content-type `import`.** De app uploadt het image naar een storage die *Import* als content-type heeft (Datacenter → Storage → kies storage → Edit → Content → *Import* aanvinken, bijvoorbeeld op `local`). Zonder zo'n storage toont *Test verbinding* een waarschuwing.
-4. Een zelfgetekend certificaat? Vink bij de server *TLS-certificaat niet controleren* aan.
+1. **API token per server.** Create a user and token (Datacenter → Permissions → API Tokens) and add the server on the *Servers* page with token ID (`user@realm!name`) and secret.
+2. **Token permissions.** Starting point: the roles `PVEVMAdmin` and `PVEDatastoreAdmin` on path `/` (with *Propagate*). The minimum needed includes `VM.Allocate`, `VM.Config.*`, `VM.Audit`, `Datastore.AllocateSpace`, `Datastore.AllocateTemplate`, `Datastore.Audit`, `Sys.Audit` and `SDN.Use` on the bridges used. This has not been tested against a real PVE 9; if a step returns 403, the deployment shows the Proxmox message and you can add the missing permission.
+3. **Storage with content type `import`.** The app uploads the image to a storage that has *Import* as a content type (Datacenter → Storage → select storage → Edit → Content → tick *Import*, for example on `local`). Without such a storage, *Test connection* shows a warning.
+4. A self-signed certificate? Tick *Do not verify TLS certificate* on the server.
 
-## Gebruik
+## Usage
 
-*Uitrollen*: sleep het bestand in het scherm, kies server en node, stel de VM in (CPU-type staat standaard op `host`) en klik *Uitrollen*. Onder *Geavanceerd* staan machine, BIOS, disk-controller, NIC-model, VMID en "VM starten na uitrollen". *Geschiedenis* toont eerdere uitrollen met logboek.
+*Deploy*: drop the file onto the screen, choose server and node, configure the VM (CPU type defaults to `host`) and click *Deploy*. Under *Advanced* you find machine, BIOS, disk controller, NIC model, VMID and "Start VM after deploy". *History* shows earlier deployments with their log.
 
-**Meerdere VM's tegelijk:** klik op *Nog een VM toevoegen* voor een ander bestand (bijvoorbeeld een FortiManager én FortiGates), en gebruik *Aantal* voor meerdere VM's van hetzelfde type (`fgt-1`, `fgt-2`, ...). Server en node gelden voor de hele batch. De voortgang van alle VM's staat op één pagina; een VM die mislukt hindert de andere niet. Een vast VMID kan alleen bij aantal 1. Alle VM's worden tegelijk geüpload, dus plan voldoende schijfruimte in de LXC en netwerkcapaciteit.
+**Multiple VMs at once:** click *Add another VM* for a different file (for example a FortiManager and FortiGates), and use *Count* for multiple VMs of the same kind (`fgt-1`, `fgt-2`, ...). Server and node apply to the whole batch. The progress of all VMs is on one page; a VM that fails does not block the others. A fixed VMID is only possible with count 1. All VMs are uploaded at the same time, so plan enough disk space in the LXC and network capacity.
 
-**Day-0 configuratie (cloud-init):** onder *Day-0 configuratie* per VM-blok geef je bij de eerste start een configuratie en FortiFlex-licentie mee, via een config-drive-ISO die de app maakt en als cd-rom aan de VM hangt. Je kunt hostname, admin-wachtwoord en netwerk laten genereren en/of eigen CLI meegeven (variabelen `{name}`, `{n}`, `{count}`, `{ip}`). Bij een vast IP en aantal > 1 telt het IP-adres per VM op. FortiFlex-tokens zet je één per regel (één per VM); je kiest of ze als MIME-bericht (FortiGate) of als regel `execute vm-license` onderaan de CLI worden meegegeven. *Voorbeeld bekijken* toont de uitkomst met afgeschermde geheimen. Je hebt een storage met content-type **ISO** nodig (`local` heeft dat standaard). Zet *VM starten na uitrollen* aan of start de VM zelf; de configuratie wordt bij de eerste start gelezen.
+**Day-0 configuration (cloud-init):** under *Day-0 configuration* per VM block you provide a configuration and FortiFlex license at first boot, through a config-drive ISO that the app builds and attaches to the VM as a CD-ROM. You can have hostname, admin password and network generated and/or provide your own CLI (variables `{name}`, `{n}`, `{count}`, `{ip}`). With a static IP and count > 1 the IP address increments per VM. Enter FortiFlex tokens one per line (one per VM); you choose whether they are passed as a MIME message (FortiGate) or as an `execute vm-license` line at the end of the CLI. *Show preview* displays the result with secrets masked. You need a storage with content type **ISO** (`local` has it by default). Enable *Start VM after deploy* or start the VM yourself; the configuration is read at first boot.
 
-Controleer op de VM met `diagnose debug cloudinit show` of de config drive is gevonden. FortiManager en FortiAnalyzer: of deze indeling en het token-deel daar werken is niet bevestigd; probeer eerst één VM, en kies anders de CLI-variant voor het token. De ISO blijft aan de VM gekoppeld en blijft op de storage staan als je de VM later in Proxmox verwijdert.
+On the VM, check with `diagnose debug cloudinit show` whether the config drive was found. FortiManager and FortiAnalyzer: whether this layout and the token part work there is not confirmed; try one VM first, and otherwise choose the CLI variant for the token. The ISO stays attached to the VM and stays on the storage if you later delete the VM in Proxmox.
 
-**Extra disks:** FortiManager en FortiAnalyzer hebben naast de boot-disk een lege tweede disk nodig voor `/var` (data en logs). Voeg die toe onder *Extra disks*; bij bestandsnamen met fmg/faz doet het formulier dat zelf (100 GB, aan te passen). FortiGate heeft een extra disk alleen nodig voor lokale logs.
+**Extra disks:** FortiManager and FortiAnalyzer need an empty second disk besides the boot disk for `/var` (data and logs). Add it under *Extra disks*; for file names containing fmg/faz the form does this itself (100 GB, adjustable). FortiGate only needs an extra disk for local logs.
 
-Standaard-VM-hardware: SeaBIOS en virtio-netwerk; beeldscherm en SCSI-controller blijven op de Proxmox-standaard (SCSI-controller te kiezen onder "Geavanceerd"). De disk wordt vergroot tot de opgegeven grootte (minimaal de virtuele grootte van het image).
+Default VM hardware: SeaBIOS and virtio network; display and SCSI controller stay on the Proxmox default (SCSI controller selectable under "Advanced"). The disk is grown to the given size (at least the virtual size of the image).
 
-Bij een mislukte uitrol worden de half aangemaakte VM en het geüploade import-bestand automatisch verwijderd; fout en logboek blijven bewaard. Wordt de container herstart tijdens een uitrol, dan wordt die als mislukt gemarkeerd en (voor zover mogelijk) opgeruimd.
+When a deployment fails, the half-created VM and the uploaded import file are removed automatically; the error and log are kept. If the container is restarted during a deployment, it is marked as failed and cleaned up as far as possible.
 
-## Ontwikkelen
+## Development
 
 ```bash
 python3.11 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
-.venv/bin/python scripts/fake_proxmox.py          # nagebootste Proxmox op :8006
-.venv/bin/uvicorn --factory app.main:create_app    # de app op :8000
+.venv/bin/python scripts/fake_proxmox.py          # fake Proxmox on :8006
+.venv/bin/uvicorn --factory app.main:create_app    # the app on :8000
 ```
 
-`FAKE_FAIL_AT=create` laat de nep-Proxmox bij het aanmaken falen, `FAKE_UPLOAD_DELAY=0.02` maakt uploaden traag zodat de voortgang zichtbaar is. Data staat in `./data` (of `PROXLABER_DATA`).
+`FAKE_FAIL_AT=create` makes the fake Proxmox fail on create, `FAKE_UPLOAD_DELAY=0.02` slows uploads so progress is visible. Data lives in `./data` (or `PROXLABER_DATA`).
 
-De app heeft geen inlogscherm; draai hem alleen op een vertrouwd netwerk.
+The app has no login screen; only run it on a trusted network.

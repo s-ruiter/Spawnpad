@@ -70,7 +70,7 @@ class ProxmoxClient:
         try:
             r = self._http.request(method, path, **kw)
         except httpx.HTTPError as e:
-            raise ProxmoxError(f"Verbinding met Proxmox mislukt: {e}") from e
+            raise ProxmoxError(f"Connection to Proxmox failed: {e}") from e
         if r.status_code >= 400:
             # Proxmox zet de foutmelding bij 5xx vaak in de HTTP reason phrase en laat de body leeg ({"data": null})
             parts = [r.reason_phrase]
@@ -80,18 +80,18 @@ class ProxmoxClient:
             except ValueError:
                 parts.append(r.text)
             detail = " — ".join(x for x in parts if x)
-            raise ProxmoxError(f"Proxmox gaf {r.status_code}: {detail}", status=r.status_code)
+            raise ProxmoxError(f"Proxmox returned {r.status_code}: {detail}", status=r.status_code)
         return r.json().get("data")
 
     def check(self) -> dict:
         version = str(self._req("GET", "/version")["version"])
         if int(version.split(".")[0]) < 9:
-            raise ProxmoxError(f"Proxmox VE {version} wordt niet ondersteund (minimaal 9)")
+            raise ProxmoxError(f"Proxmox VE {version} is not supported (minimum 9)")
         # GET /storage kent geen 'content'-filter; de storage-configs bevatten wel een content-lijst
         storages = [s for s in (self._req("GET", "/storage") or []) if "import" in str(s.get("content", "")).split(",")]
         result: dict = {"version": version, "import_storages": [s["storage"] for s in storages]}
         if not storages:
-            result["warning"] = "Geen storage met content-type import gevonden"
+            result["warning"] = "No storage with content type import found"
         return result
 
     def nodes(self) -> list[str]:
@@ -193,10 +193,10 @@ class ProxmoxClient:
                 raise
             if st.get("status") == "stopped":
                 if st.get("exitstatus") != "OK":
-                    raise ProxmoxError(f"Taak mislukt: {st.get('exitstatus')}")
+                    raise ProxmoxError(f"Task failed: {st.get('exitstatus')}")
                 return
             if time.monotonic() > deadline:
-                raise ProxmoxError("Time-out bij wachten op Proxmox-taak")
+                raise ProxmoxError("Timed out waiting for Proxmox task")
             if on_tick:
                 on_tick()
             time.sleep(self.poll_interval)

@@ -53,7 +53,7 @@ def run(tmp_path):
 # volgorde van de vragen: CT-ID, hostnaam, storage, bridge, VLAN, netwerk (dhcp/static),
 # [IP, gateway, DNS], schijf GB, geheugen MB, cores, wachtwoord [, herhaal], bevestiging
 def test_wizard_static_ip(run):
-    r = run(["", "fw-deploy", "", "", "20", "static", "192.168.1.50/24", "192.168.1.1", "", "", "", "", "", "j"])
+    r = run(["", "fw-deploy", "", "", "20", "static", "192.168.1.50/24", "192.168.1.1", "", "", "", "", "", "y"])
     assert r.returncode == 0, r.stderr + r.stdout
     assert r.create and "--hostname fw-deploy" in r.create
     assert "--net0 name=eth0,bridge=vmbr0,tag=20,ip=192.168.1.50/24,gw=192.168.1.1" in r.create
@@ -62,7 +62,7 @@ def test_wizard_static_ip(run):
 
 
 def test_wizard_dhcp_with_defaults(run):
-    r = run(["", "", "", "", "", "", "", "", "", "", "j"])
+    r = run(["", "", "", "", "", "", "", "", "", "", "y"])
     assert r.returncode == 0, r.stderr + r.stdout
     assert "--net0 name=eth0,bridge=vmbr0,ip=dhcp" in r.create
     assert "--rootfs local-lvm:16" in r.create and "--memory 1024" in r.create and "--cores 2" in r.create
@@ -70,14 +70,14 @@ def test_wizard_dhcp_with_defaults(run):
 
 
 def test_wizard_rejects_invalid_ip_then_accepts(run):
-    r = run(["", "", "", "", "", "static", "999.1.1.1/24", "10.0.0.5", "10.0.0.5/24", "10.0.0.1", "", "", "", "", "", "j"])
+    r = run(["", "", "", "", "", "static", "999.1.1.1/24", "10.0.0.5", "10.0.0.5/24", "10.0.0.1", "", "", "", "", "", "y"])
     assert r.returncode == 0, r.stderr + r.stdout
     assert "ip=10.0.0.5/24,gw=10.0.0.1" in r.create
     assert "ip=999" not in r.create
 
 
 def test_wizard_password_is_confirmed(run):
-    r = run(["", "", "", "", "", "", "", "", "", "geheim", "anders", "geheim", "geheim", "j"])
+    r = run(["", "", "", "", "", "", "", "", "", "geheim", "anders", "geheim", "geheim", "y"])
     assert r.returncode == 0, r.stderr + r.stdout
     assert "--password geheim" in r.create
 
@@ -88,7 +88,7 @@ def test_wizard_abort_creates_nothing(run):
 
 
 def test_wizard_rejects_unknown_storage(run):
-    r = run(["", "", "bestaatniet", "local", "", "", "", "", "", "", "", "j"])
+    r = run(["", "", "doesnotexist", "local", "", "", "", "", "", "", "", "y"])
     assert r.returncode == 0, r.stderr + r.stdout
     assert "--rootfs local:16" in r.create
 

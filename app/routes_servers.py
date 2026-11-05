@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/servers")
 def get_server(conn: sqlite3.Connection, server_id: int) -> sqlite3.Row:
     row = conn.execute("SELECT * FROM servers WHERE id=?", (server_id,)).fetchone()
     if row is None:
-        raise HTTPException(404, "Server niet gevonden")
+        raise HTTPException(404, "Server not found")
     return row
 
 
@@ -32,7 +32,7 @@ def list_servers(request: Request) -> list[ServerOut]:
 def create_server(body: ServerIn, request: Request) -> ServerOut:
     conn = request.app.state.conn
     if not body.token_secret:
-        raise HTTPException(422, "token_secret is verplicht")
+        raise HTTPException(422, "token_secret is required")
     try:
         cur = conn.execute(
             "INSERT INTO servers(name,url,token_id,token_secret,verify_tls) VALUES(?,?,?,?,?)",
@@ -40,7 +40,7 @@ def create_server(body: ServerIn, request: Request) -> ServerOut:
         )
         conn.commit()
     except sqlite3.IntegrityError:
-        raise HTTPException(409, "Er bestaat al een server met die naam")
+        raise HTTPException(409, "A server with that name already exists")
     return _out(get_server(conn, cur.lastrowid))
 
 
@@ -50,7 +50,7 @@ def update_server(server_id: int, body: ServerIn, request: Request) -> ServerOut
     old = get_server(conn, server_id)
     new_url = body.url.rstrip("/")
     if not body.token_secret and (new_url != old["url"] or body.token_id != old["token_id"]):
-        raise HTTPException(422, "Vul het token-secret opnieuw in als je de URL of het token-ID wijzigt")
+        raise HTTPException(422, "Enter the token secret again when you change the URL or token ID")
     secret = body.token_secret or old["token_secret"]
     try:
         conn.execute(
@@ -59,7 +59,7 @@ def update_server(server_id: int, body: ServerIn, request: Request) -> ServerOut
         )
         conn.commit()
     except sqlite3.IntegrityError:
-        raise HTTPException(409, "Er bestaat al een server met die naam")
+        raise HTTPException(409, "A server with that name already exists")
     return _out(get_server(conn, server_id))
 
 

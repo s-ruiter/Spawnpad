@@ -28,18 +28,18 @@ def nth_ip(start: str, n: int) -> str:
     try:
         iface = ipaddress.ip_interface(start)
     except ValueError as e:
-        raise ValueError(f"Ongeldig IP-adres '{start}' (gebruik de vorm 10.0.0.11/24)") from e
+        raise ValueError(f"Invalid IP address '{start}' (use the form 10.0.0.11/24)") from e
     if "/" not in start or iface.version != 4:
-        raise ValueError(f"Ongeldig IP-adres '{start}' (gebruik de vorm 10.0.0.11/24)")
+        raise ValueError(f"Invalid IP address '{start}' (use the form 10.0.0.11/24)")
     addr = iface.ip + (n - 1)
     if addr not in iface.network or addr == iface.network.broadcast_address or addr == iface.network.network_address:
-        raise ValueError(f"Het IP-adres voor VM {n} ({addr}) valt buiten het subnet {iface.network}")
+        raise ValueError(f"The IP address for VM {n} ({addr}) falls outside the subnet {iface.network}")
     return f"{addr}/{iface.network.prefixlen}"
 
 
 def _q(value: str) -> str:
     if "\n" in value or "\r" in value:
-        raise ValueError("Een wachtwoord mag geen regeleinde bevatten")
+        raise ValueError("A password must not contain a line break")
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
@@ -47,7 +47,7 @@ def _ipv4(value: str, what: str) -> str:
     try:
         return str(ipaddress.IPv4Address(value.strip()))
     except ValueError as e:
-        raise ValueError(f"Ongeldig {what}: '{value}'") from e
+        raise ValueError(f"Invalid {what}: '{value}'") from e
 
 
 def render_cli(spec: Day0Spec, name: str, n: int, count: int) -> str:
@@ -55,7 +55,7 @@ def render_cli(spec: Day0Spec, name: str, n: int, count: int) -> str:
     ip_cidr = ""
     if spec.product != "other" and net.mode == "static":
         if not net.ip or not net.gateway:
-            raise ValueError("Bij een vast IP zijn IP-adres en gateway verplicht")
+            raise ValueError("A static IP requires an IP address and gateway")
         ip_cidr = nth_ip(net.ip, n)
     bare_ip = ip_cidr.split("/")[0]
     sub = lambda t: substitute(t, name, n, count, bare_ip)  # noqa: E731
@@ -63,11 +63,11 @@ def render_cli(spec: Day0Spec, name: str, n: int, count: int) -> str:
 
     if spec.product != "other":
         if spec.product in ("fortimanager", "fortianalyzer") and net.mode != "static":
-            raise ValueError("FortiManager en FortiAnalyzer hebben een vast IP nodig voor de eerste configuratie")
+            raise ValueError("FortiManager and FortiAnalyzer need a static IP for the initial configuration")
         host = sub(spec.hostname or "")
         if host:
             if not HOSTNAME_RE.match(host):
-                raise ValueError(f"Ongeldige hostname '{host}' (letters, cijfers, - _ . en maximaal 35 tekens)")
+                raise ValueError(f"Invalid hostname '{host}' (letters, digits, - _ . and at most 35 characters)")
             lines += ["config system global", f"    set hostname {host}", "end"]
         gate = spec.product == "fortigate"
         if spec.admin_password:
@@ -86,7 +86,7 @@ def render_cli(spec: Day0Spec, name: str, n: int, count: int) -> str:
             if not gate:
                 lines += ["        set dst 0.0.0.0 0.0.0.0"]
             lines += [f"        set gateway {gw}", f"        set device {iface}", "    next", "end"]
-        dns = [_ipv4(d, "DNS-server") for d in net.dns if d.strip()]
+        dns = [_ipv4(d, "DNS server") for d in net.dns if d.strip()]
         if dns:
             lines += ["config system dns", f"    set primary {dns[0]}"] + ([f"    set secondary {dns[1]}"] if len(dns) > 1 else []) + ["end"]
 
@@ -100,10 +100,10 @@ def pick_tokens(tokens: list[str], count: int) -> list[str | None]:
     if not cleaned:
         return [None] * count
     if len(cleaned) != count:
-        raise ValueError(f"{len(cleaned)} tokens opgegeven voor {count} VM's: geef er precies {count} op (één per VM)")
+        raise ValueError(f"{len(cleaned)} tokens given for {count} VMs: provide exactly {count} (one per VM)")
     for t in cleaned:
         if not TOKEN_RE.match(t):
-            raise ValueError("Een FortiFlex-token mag alleen letters en cijfers bevatten")
+            raise ValueError("A FortiFlex token may only contain letters and digits")
     return cleaned
 
 
@@ -126,7 +126,7 @@ def render_user_data(spec: Day0Spec, name: str, n: int, count: int, token: str |
     try:
         data.encode("ascii")
     except UnicodeEncodeError as e:
-        raise ValueError("De Day-0 configuratie mag alleen ASCII-tekens bevatten") from e
+        raise ValueError("The Day-0 configuration may only contain ASCII characters") from e
     return data
 
 

@@ -15,7 +15,7 @@ def qcow2_virtual_size(path: Path) -> int:
     with open(path, "rb") as fh:
         head = fh.read(32)
     if len(head) < 32 or head[:4] != MAGIC:
-        raise ValueError(f"{Path(path).name} is geen geldig qcow2-bestand")
+        raise ValueError(f"{Path(path).name} is not a valid qcow2 file")
     return struct.unpack(">Q", head[24:32])[0]
 
 
@@ -27,7 +27,7 @@ def inspect_zip(path: Path, dest: Path) -> list[Path]:
     try:
         zf = zipfile.ZipFile(path)
     except zipfile.BadZipFile as e:
-        raise ValueError("Ongeldig zip-bestand") from e
+        raise ValueError("Invalid zip file") from e
     out: list[Path] = []
     with zf:
         for info in zf.infolist():
@@ -43,10 +43,10 @@ def inspect_zip(path: Path, dest: Path) -> list[Path]:
                 with zf.open(info) as src, open(target, "wb") as dst:
                     shutil.copyfileobj(src, dst, CHUNK)
             except (zipfile.BadZipFile, OSError) as e:
-                raise ValueError("Zip-bestand is beschadigd") from e
+                raise ValueError("Zip file is corrupt") from e
             out.append(target)
     if not out:
-        raise ValueError("Geen .qcow2-bestand in de zip gevonden")
+        raise ValueError("No .qcow2 file found in the zip")
     return out
 
 

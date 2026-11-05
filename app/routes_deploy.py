@@ -14,7 +14,7 @@ _ID = re.compile(r"^[0-9a-f]{32}$")
 
 def upload_dir(request: Request, upload_id: str):
     if not _ID.match(upload_id):
-        raise HTTPException(404, "Upload niet gevonden")
+        raise HTTPException(404, "Upload not found")
     return request.app.state.settings.temp_dir / "uploads" / upload_id
 
 
@@ -22,7 +22,7 @@ def upload_dir(request: Request, upload_id: str):
 def create_upload(file: UploadFile, request: Request) -> UploadInfo:  # sync: draait in de threadpool, blokkeert de event loop niet
     name = (file.filename or "").lower()
     if not name.endswith((".qcow2", ".zip")):
-        raise HTTPException(422, "Alleen .qcow2 of .zip bestanden zijn toegestaan")
+        raise HTTPException(422, "Only .qcow2 or .zip files are allowed")
     images.cleanup_old_uploads(request.app.state.settings.temp_dir)  # verlaten uploads opruimen zolang de schijf er nog is
     upload_id = uuid.uuid4().hex
     d = upload_dir(request, upload_id)
@@ -83,14 +83,14 @@ def _get_job(conn, job_id: str):
         "SELECT j.*, s.name AS server_name FROM jobs j LEFT JOIN servers s ON s.id=j.server_id WHERE j.id=?", (job_id,)
     ).fetchone()
     if row is None:
-        raise HTTPException(404, "Uitrol niet gevonden")
+        raise HTTPException(404, "Deployment not found")
     return row
 
 
 @router.post("/deployments", status_code=201)
 def create_deployment(body: DeployIn, request: Request) -> dict:
     if not _ID.match(body.upload_id):
-        raise HTTPException(404, "Upload niet gevonden")
+        raise HTTPException(404, "Upload not found")
     try:
         job_id = request.app.state.job_manager.start(
             request.app.state.conn, body.server_id, body.config, body.upload_id, body.candidate
@@ -108,7 +108,7 @@ def create_deployment(body: DeployIn, request: Request) -> dict:
 def create_batch(body: BatchIn, request: Request) -> dict:
     for it in body.items:
         if not _ID.match(it.upload_id):
-            raise HTTPException(404, "Upload niet gevonden")
+            raise HTTPException(404, "Upload not found")
     try:
         batch_id, jobs = request.app.state.job_manager.start_batch(request.app.state.conn, body.server_id, body.items)
     except LookupError as e:
@@ -129,9 +129,9 @@ class PreviewIn(BaseModel):
 
 @router.post("/cloudinit/preview")
 def cloudinit_preview(body: PreviewIn) -> dict:
-    """Toont de user_data die voor VM n gebouwd wordt, met wachtwoord en token afgeschermd."""
+    """Shows the user_data that will be built for VM n, with password and token masked."""
     if not 1 <= body.n <= body.count <= 20:
-        raise HTTPException(422, "Ongeldig aantal")
+        raise HTTPException(422, "Invalid count")
     try:
         cloudinit.pick_tokens(body.day0.tokens, body.count)  # valideert aantal en tekens
         masked = body.day0.model_copy(update={"admin_password": "********" if body.day0.admin_password else None})
@@ -148,7 +148,7 @@ def get_batch(batch_id: str, request: Request) -> dict:
         "SELECT b.*, s.name AS server_name FROM batches b LEFT JOIN servers s ON s.id=b.server_id WHERE b.id=?", (batch_id,)
     ).fetchone()
     if batch is None:
-        raise HTTPException(404, "Batch niet gevonden")
+        raise HTTPException(404, "Batch not found")
     jobs = []
     for j in conn.execute("SELECT * FROM jobs WHERE batch_id=? ORDER BY created_at, rowid", (batch_id,)).fetchall():
         last = conn.execute("SELECT * FROM job_events WHERE job_id=? ORDER BY id DESC LIMIT 1", (j["id"],)).fetchone()
