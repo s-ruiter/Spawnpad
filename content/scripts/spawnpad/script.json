@@ -1,0 +1,101 @@
+{
+  "name": "Spawnpad",
+  "tagline": "Deploy Fortinet qcow2/zip images as ready-to-run VMs on Proxmox VE, in bulk, with Day-0 config and FortiFlex licensing.",
+  "description": [
+    "Spawnpad is a Proxmox LXC with a web GUI that turns a Fortinet KVM image (a .qcow2 or a .zip containing one) into a configured VM with a single click. Pick one of your Proxmox servers and a node, drop the file onto the page, set CPU (type host by default), memory, disk, datastore and network interfaces with optional VLAN tags, and follow the upload and import live. It talks to Proxmox VE 9 or newer through API tokens only, so no SSH access is needed.",
+    "Deploy several VMs at once: add a block per image (for example a FortiManager and a set of FortiGates) and a count per block (fgt-1, fgt-2, ...). Extra data disks are supported for the /var disk that FortiManager and FortiAnalyzer need. An optional Day-0 configuration is delivered through a cloud-init config-drive ISO: hostname, admin password, interface, gateway and DNS are generated for FortiGate, FortiManager or FortiAnalyzer, followed by your own CLI. FortiFlex tokens (one per VM) are applied with execute vm-license, and secrets are never stored or logged. A failed deployment cleans up its half-created VM and temporary files."
+  ],
+  "category": "tool",
+  "platform": "proxmox",
+  "status": "beta",
+  "icon": "rocket",
+  "products": [
+    "FortiGate",
+    "FortiManager",
+    "FortiAnalyzer",
+    "FortiOS"
+  ],
+  "tags": [
+    "cloud-init",
+    "day-0",
+    "deployment",
+    "fortiflex",
+    "fortimanager",
+    "fortianalyzer",
+    "kvm",
+    "lxc",
+    "provisioning",
+    "qcow2"
+  ],
+  "author": {
+    "name": "Sander Ruiter"
+  },
+  "updated": "2026-11-09",
+  "repository": "https://github.com/s-ruiter/Spawnpad",
+  "requirements": [
+    {
+      "label": "Proxmox VE",
+      "value": "9.x or newer (API tokens, no SSH)"
+    },
+    {
+      "label": "Container",
+      "value": "Debian 12 unprivileged LXC, 2 vCPU, 1 GB RAM, 16 GB disk by default (created by the installer); plan 2-3x the image size in disk space for uploads"
+    },
+    {
+      "label": "Proxmox storage",
+      "value": "A storage with the content type Import (and ISO for the Day-0 config drive) on every target node"
+    },
+    {
+      "label": "API token",
+      "value": "A user and API token per Proxmox server with VM and datastore permissions (see the README)"
+    },
+    {
+      "label": "Network",
+      "value": "The LXC must reach the Proxmox API (port 8006); the web GUI listens on port 8080 and has no login, so run it on a trusted network"
+    }
+  ],
+  "install": [
+    {
+      "title": "Interactive install",
+      "runOn": "Proxmox VE host (root)",
+      "command": "bash -c \"$(curl -fsSL https://raw.githubusercontent.com/s-ruiter/Spawnpad/main/deploy/install.sh)\""
+    },
+    {
+      "title": "Update an existing LXC",
+      "runOn": "Proxmox VE host (root)",
+      "command": "pct exec <CTID> -- bash -c 'cd /opt/proxlaber && runuser -u proxlaber -- git pull -q && .venv/bin/pip install -q . && systemctl restart proxlaber'"
+    }
+  ],
+  "steps": [
+    "Run the installer on the Proxmox host and answer the wizard (container ID, hostname, storage, bridge, VLAN, IP settings, resources).",
+    "Open the web GUI on the printed URL (http://<container-ip>:8080) and add your Proxmox server on the Servers page with its API token.",
+    "On Proxmox, enable the Import content type on a storage (Datacenter > Storage) so images can be uploaded.",
+    "Go to Deploy, choose the server and node, and drop a .qcow2 or .zip file onto a VM block.",
+    "Set the name, count, CPU, memory, disk, datastore and network. Use Add disk for the /var disk of a FortiManager or FortiAnalyzer, and Add another VM for a different image.",
+    "Optional: open Day-0 configuration to set hostname, admin password, network, your own CLI and FortiFlex tokens, and check the result with Show preview.",
+    "Click Deploy and follow the progress per VM. Start the VMs (or tick Start VM after deploy) so the Day-0 configuration is read at first boot.",
+    "Review earlier deployments, with their log, under History."
+  ],
+  "screenshots": [
+    {
+      "file": "01-deploy.png",
+      "caption": "Deploy: drop a qcow2 or zip, choose server and node, and set CPU, memory, disk, datastore and network."
+    },
+    {
+      "file": "02-multiple-vms.png",
+      "caption": "Deploy several VMs at once: one block per image with its own count, extra disks (such as /var for FortiManager) and network."
+    },
+    {
+      "file": "03-day0-config.png",
+      "caption": "Day-0 configuration: generated CLI, your own CLI and FortiFlex tokens delivered through a cloud-init config drive, with a preview that masks secrets."
+    },
+    {
+      "file": "04-batch-progress.png",
+      "caption": "Batch progress: every VM shows its own step and upload percentage; a failed VM does not block the others."
+    },
+    {
+      "file": "05-history.png",
+      "caption": "History: earlier deployments with status, VMID and log."
+    }
+  ]
+}

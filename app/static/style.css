@@ -58,6 +58,7 @@ main > a:hover { color: var(--text); }
 .batchrow .what.bad { color: var(--bad); }
 .batchrow .bar { grid-column: 3; margin: 0 0 8px; }
 .card.batch { padding: 8px 20px; }
+#view > div[class=""]:not(:empty), #view > div:not([class]):not(:empty) { margin-bottom: 16px; }
 
 /* iconen */
 .i { display: inline-flex; width: 16px; height: 16px; flex: none; }
