@@ -91,28 +91,18 @@ def test_custom_cli_is_appended_with_variables():
 
 
 def test_plain_user_data_without_token():
-    assert ci.build_user_data("config system global\nend\n", token=None, mode="mime") == "config system global\nend\n"
+    assert ci.build_user_data("config system global\nend\n", token=None) == "config system global\nend\n"
 
 
-def test_mime_user_data_with_token():
-    cli = "config system global\n set hostname fgt\nend\n"
-    data = ci.build_user_data(cli, token="ABC123DEF456", mode="mime")
-    msg = email.message_from_string(data)
-    parts = msg.get_payload()
-    assert [p.get_filename() for p in parts] == ["config", "license"]
-    assert "set hostname fgt" in parts[0].get_payload()
-    assert parts[1].get_payload().strip() == "LICENSE-TOKEN:ABC123DEF456"
-
-
-def test_cli_mode_appends_execute_command():
-    data = ci.build_user_data("config system global\nend\n", token="ABC123", mode="cli")
+def test_token_appends_execute_command():
+    data = ci.build_user_data("config system global\nend\n", token="ABC123")
     assert data.rstrip().endswith("execute vm-license ABC123")
     assert not data.startswith("Content-Type")
 
 
 def test_token_without_cli_still_works():
-    data = ci.build_user_data("", token="ABC123", mode="mime")
-    assert "LICENSE-TOKEN:ABC123" in data
+    data = ci.build_user_data("", token="ABC123")
+    assert data == "execute vm-license ABC123\n"
 
 
 def test_pick_tokens_requires_matching_count():

@@ -76,7 +76,6 @@ class Day0Spec(BaseModel):
     network: Day0Network = Field(default_factory=Day0Network)
     custom_cli: str = ""
     tokens: list[str] = Field(default_factory=list)   # FortiFlex-tokens, één per VM
-    token_mode: Literal["mime", "cli"] = "mime"
 
 
 class BatchItem(BaseModel):

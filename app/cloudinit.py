@@ -1,7 +1,7 @@
 """Day-0 configuratie (cloud-init) voor Fortinet-VM's via een config-drive-ISO.
 
 FortiOS zoekt bij de eerste start naar een config drive met `openstack/latest/user_data` (zie Fortinet KVM-gids,
-"Cloud-init"). Met een FortiFlex-token wordt user_data een MIME-bericht met een `config`- en een `license`-deel.
+"Cloud-init"). Een FortiFlex-token wordt als laatste regel `execute vm-license <token>` aan de CLI toegevoegd.
 """
 import io
 import ipaddress
@@ -12,7 +12,6 @@ import pycdlib
 
 from .schemas import Day0Spec
 
-BOUNDARY = "===============0740947994048919689=="
 TOKEN_RE = re.compile(r"^[A-Za-z0-9]{1,64}$")
 HOSTNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,35}$")
 VARS = ("name", "n", "count", "ip")
@@ -107,22 +106,15 @@ def pick_tokens(tokens: list[str], count: int) -> list[str | None]:
     return cleaned
 
 
-def build_user_data(cli: str, token: str | None, mode: str) -> str:
+def build_user_data(cli: str, token: str | None) -> str:
     if token is None:
         return cli
-    if mode == "cli":
-        return cli.rstrip("\n") + ("\n" if cli.strip() else "") + f"execute vm-license {token}\n"
+    return cli.rstrip("\n") + ("\n" if cli.strip() else "") + f"execute vm-license {token}\n"
 
-    def part(filename: str, body: str) -> str:
-        return (f"--{BOUNDARY}\nContent-Type: text/plain; charset=\"us-ascii\"\nMIME-Version: 1.0\n"
-                f"Content-Transfer-Encoding: 7bit\nContent-Disposition: attachment; filename=\"{filename}\"\n\n{body}\n")
-
-    return (f"Content-Type: multipart/mixed; boundary=\"{BOUNDARY}\"\nMIME-Version: 1.0\n\n"
-            + part("config", cli.rstrip("\n")) + part("license", f"LICENSE-TOKEN:{token}") + f"--{BOUNDARY}--\n")
 
 
 def render_user_data(spec: Day0Spec, name: str, n: int, count: int, token: str | None) -> str:
-    data = build_user_data(render_cli(spec, name, n, count), token, spec.token_mode)
+    data = build_user_data(render_cli(spec, name, n, count), token)
     try:
         data.encode("ascii")
     except UnicodeEncodeError as e:

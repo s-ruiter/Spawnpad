@@ -11,7 +11,7 @@ Requires **Proxmox VE 9 or newer**. The app talks to Proxmox exclusively through
 Open the Proxmox host shell and run as root:
 
 ```bash
-bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/s-ruiter/Spawnpad/main/deploy/install.sh)"
 ```
 
 The script starts a **wizard** that asks for container ID, hostname, storage, bridge, VLAN, network (DHCP or a static IP address with gateway and DNS), disk size, memory, cores and an optional root password. Enter accepts the default; input is validated and you get a summary to confirm. It then creates a Debian 12 container, fetches the code from the repo (`git clone`), installs the app as a systemd service and shows the address (port 8080).
@@ -20,10 +20,10 @@ Without questions (for example for automation) use `--yes`; environment variable
 
 ```bash
 CT_IP=192.168.1.50/24 CT_GATEWAY=192.168.1.1 VLAN=20 STORAGE=ssd \
-  bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)" -- --yes
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/s-ruiter/Spawnpad/main/deploy/install.sh)" -- --yes
 ```
 
-Available variables: `CTID`, `HOSTNAME_CT`, `STORAGE`, `BRIDGE`, `VLAN`, `CT_IP` (`dhcp` or `192.168.1.50/24`), `CT_GATEWAY`, `CT_DNS`, `CT_PASSWORD`, `DISK_GB`, `MEMORY`, `CORES`, `TEMPLATE_STORAGE`, `REPO_URL`, `BRANCH` (`main`). If the repo is private, put credentials in `REPO_URL` (for example `http://sander:TOKEN@10.10.100.3:8010/sander/ProxLaber.git`), or copy the project to the host and run `bash deploy/install.sh`; the local code is then used.
+Available variables: `CTID`, `HOSTNAME_CT`, `STORAGE`, `BRIDGE`, `VLAN`, `CT_IP` (`dhcp` or `192.168.1.50/24`), `CT_GATEWAY`, `CT_DNS`, `CT_PASSWORD`, `DISK_GB`, `MEMORY`, `CORES`, `TEMPLATE_STORAGE`, `REPO_URL`, `BRANCH` (`main`). If the repo is private, put credentials in `REPO_URL` (for example `https://USER:TOKEN@github.com/s-ruiter/Spawnpad.git`), or copy the project to the host and run `bash deploy/install.sh`; the local code is then used.
 
 The container needs disk space for temporary uploads and for extracting zips: for a zip plan at least 3× the file size (upload, extraction and copy), for a plain qcow2 2× (`DISK_GB`). Abandoned uploads are cleaned up on the next upload (after 6 hours). Updating later (the container must be able to reach the git server):
 
@@ -44,9 +44,9 @@ pct exec <CTID> -- bash -c 'cd /opt/proxlaber && runuser -u proxlaber -- git pul
 
 **Multiple VMs at once:** click *Add another VM* for a different file (for example a FortiManager and FortiGates), and use *Count* for multiple VMs of the same kind (`fgt-1`, `fgt-2`, ...). Server and node apply to the whole batch. The progress of all VMs is on one page; a VM that fails does not block the others. A fixed VMID is only possible with count 1. All VMs are uploaded at the same time, so plan enough disk space in the LXC and network capacity.
 
-**Day-0 configuration (cloud-init):** under *Day-0 configuration* per VM block you provide a configuration and FortiFlex license at first boot, through a config-drive ISO that the app builds and attaches to the VM as a CD-ROM. You can have hostname, admin password and network generated and/or provide your own CLI (variables `{name}`, `{n}`, `{count}`, `{ip}`). With a static IP and count > 1 the IP address increments per VM. Enter FortiFlex tokens one per line (one per VM); you choose whether they are passed as a MIME message (FortiGate) or as an `execute vm-license` line at the end of the CLI. *Show preview* displays the result with secrets masked. You need a storage with content type **ISO** (`local` has it by default). Enable *Start VM after deploy* or start the VM yourself; the configuration is read at first boot.
+**Day-0 configuration (cloud-init):** under *Day-0 configuration* per VM block you provide a configuration and FortiFlex license at first boot, through a config-drive ISO that the app builds and attaches to the VM as a CD-ROM. You can have hostname, admin password and network generated and/or provide your own CLI (variables `{name}`, `{n}`, `{count}`, `{ip}`). With a static IP and count > 1 the IP address increments per VM. Enter FortiFlex tokens one per line (one per VM); each is applied as an `execute vm-license <token>` line at the end of the CLI. *Show preview* displays the result with secrets masked. You need a storage with content type **ISO** (`local` has it by default). Enable *Start VM after deploy* or start the VM yourself; the configuration is read at first boot.
 
-On the VM, check with `diagnose debug cloudinit show` whether the config drive was found. FortiManager and FortiAnalyzer: whether this layout and the token part work there is not confirmed; try one VM first, and otherwise choose the CLI variant for the token. The ISO stays attached to the VM and stays on the storage if you later delete the VM in Proxmox.
+On the VM, check with `diagnose debug cloudinit show` whether the config drive was found. FortiManager and FortiAnalyzer: whether this config-drive layout works there is not confirmed; try one VM first. The ISO stays attached to the VM and stays on the storage if you later delete the VM in Proxmox.
 
 **Extra disks:** FortiManager and FortiAnalyzer need an empty second disk besides the boot disk for `/var` (data and logs). Add it under *Extra disks*; for file names containing fmg/faz the form does this itself (100 GB, adjustable). FortiGate only needs an extra disk for local logs.
 

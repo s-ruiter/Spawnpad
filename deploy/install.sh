@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Creates an LXC container on this Proxmox host and installs Spawnpad in it.
 # Run as root in the Proxmox host shell, for example:
-#   bash -c "$(curl -fsSL http://10.10.100.3:8010/sander/ProxLaber/raw/branch/main/deploy/install.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/s-ruiter/Spawnpad/main/deploy/install.sh)"
 # or from an extracted copy of the project:  bash deploy/install.sh
 #
 # Starts a wizard that asks for the settings (network, storage, resources).
@@ -28,7 +28,7 @@ for arg in "$@"; do
   esac
 done
 
-REPO_URL="${REPO_URL:-http://10.10.100.3:8010/sander/ProxLaber.git}"
+REPO_URL="${REPO_URL:-https://github.com/s-ruiter/Spawnpad.git}"
 BRANCH="${BRANCH:-main}"
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 

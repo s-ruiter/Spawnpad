@@ -253,7 +253,7 @@ def test_preview_masks_secrets(client, app):
     text = r.json()["user_data"]
     assert "set hostname fgt-1" in text or "set hostname fgt" in text
     assert "Sup3rS3cret" not in text and "AAAA1111" not in text and "BBBB2222" not in text
-    assert "LICENSE-TOKEN" in text
+    assert "execute vm-license" in text
 
 
 def test_preview_reports_errors(client, app):

@@ -317,7 +317,7 @@ def test_without_lock_there_is_no_reservation_wait(image):
 
 
 def cfg_ci(**kw):
-    return cfg(iso_storage="local", user_data="config system global\n set hostname SECRETHOST\nend\n LICENSE-TOKEN:TOKEN12345", **kw)
+    return cfg(iso_storage="local", user_data="config system global\n set hostname SECRETHOST\nend\n execute vm-license TOKEN12345", **kw)
 
 
 def test_cloudinit_step_is_in_steps():

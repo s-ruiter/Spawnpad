@@ -217,7 +217,6 @@ function createVmBlock(shared, onChange, onRemove) {
   const cliIn = h("textarea", { placeholder: "config system global\n    set timezone 26\nend", spellcheck: "false" });
   const tokIn = h("textarea", { placeholder: "One FortiFlex token per line (one per VM)", spellcheck: "false", oninput: () => { syncD0(); } });
   const tokHint = h("div", { class: "hint" });
-  const tokMode = select([["mime", "MIME message with license part (FortiGate)"], ["cli", "'execute vm-license' line at the end of the CLI"]], "mime");
   const isoSel = h("select", { onchange: onChange });
   const isoWarn = h("div", { class: "warn", hidden: true }, "This node has no storage with content type 'ISO'. Enable it under Datacenter → Storage.");
   const previewOut = h("pre", { class: "log", hidden: true });
@@ -228,7 +227,7 @@ function createVmBlock(shared, onChange, onRemove) {
     h("div", { class: "row" }, field("Network", netMode), field("Interface", ifIn)),
     staticBox,
     field("Custom CLI (placed after the generated config)", cliIn, "Variables: {name} {n} {count} {ip}. May be left empty."),
-    field("FortiFlex-tokens", tokIn), tokHint, field("Pass token as", tokMode),
+    field("FortiFlex tokens", tokIn, "Applied with 'execute vm-license <token>' at the end of the CLI"), tokHint,
     field("Storage for the config drive (ISO)", isoSel), isoWarn,
     h("div", {}, previewBtn), previewErr, previewOut);
   const d0Details = h("details", {}, h("summary", {}, "Day-0 configuration (cloud-init)"),
@@ -279,7 +278,7 @@ function createVmBlock(shared, onChange, onRemove) {
     return {
       product: prodSel.value, hostname: hostIn.value.trim() || null, admin_password: pwIn.value || null,
       network: { mode: netMode.value, interface: ifIn.value.trim() || "port1", ip: ipIn.value.trim() || null, gateway: gwIn.value.trim() || null, dns: [dns1.value.trim(), dns2.value.trim()].filter(Boolean) },
-      custom_cli: cliIn.value, tokens: tokens(), token_mode: tokMode.value,
+      custom_cli: cliIn.value, tokens: tokens(),
     };
   }
 
